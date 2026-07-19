@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ETL_DB_PATH=/app/data/pipeline.db
+    restart: unless-stopped
+
+  # Run ETL pipeline manually
+  etl:
+    build: .
+    volumes:
+      - ./data:/app/data
+    environment:
+      - ETL_DB_PATH=/app/data/pipeline.db
+    entrypoint: ["python", "-m", "etl"]
+    command: ["scrape", "http://example.com", "--selectors", "h2"]
+    profiles:
+      - tools
