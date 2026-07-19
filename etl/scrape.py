@@ -1,4 +1,4 @@
-"""Fase de extracción: httpx async + lxml XPath + rate limit + retry."""
+"""Fase de extracción: httpx async + selectolax + rate limit + retry."""
 
 from __future__ import annotations
 
@@ -6,64 +6,16 @@ import asyncio
 import json
 import logging
 import random
-import re
 import sqlite3
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
-from lxml import etree
+from selectolax.parser import HTMLParser
 
 from etl.config import ScrapeConfig
 
 logger = logging.getLogger("etl.scrape")
-
-
-def _css_to_xpath(selector: str) -> str:
-    """Convierte selectores CSS simples a XPath.
-
-    Soporta: h2.title, .title, h2, #id, div > span, tag[attr="val"]
-    """
-    sel = selector.strip()
-
-    # ID selector: #myid
-    if sel.startswith("#"):
-        return f'//*[@id="{sel[1:]}"]'
-
-    # Class-only selector: .classname
-    if sel.startswith(".") and " " not in sel:
-        return f'//*[contains(concat(" ",normalize-space(@class)," "),concat(" ","{sel[1:]}"," "))]'
-
-    # Tag with class: h2.classname
-    m = re.match(r'^(\w+)\.([\w-]+)$', sel)
-    if m:
-        tag, cls = m.groups()
-        return f'//{tag}[contains(concat(" ",normalize-space(@class)," "),concat(" ","{cls}"," "))]'
-
-    # Tag with attribute: tag[attr="val"]
-    m = re.match(r'^(\w+)\[(\w+)="([^"]+)"\]$', sel)
-    if m:
-        tag, attr, val = m.groups()
-        return f'//{tag}[@{attr}="{val}"]'
-
-    # Descendant: parent > child or parent child
-    if ">" in sel:
-        parts = [p.strip() for p in sel.split(">")]
-        xpath = "//" + "/".join(parts)
-        return xpath
-
-    # Space-separated descendants
-    if " " in sel:
-        parts = sel.split()
-        xpath = "//" + "/".join(parts)
-        return xpath
-
-    # Simple tag: h2, div, span
-    if re.match(r'^[\w]+$', sel):
-        return f"//{sel}"
-
-    # Fallback: contains class
-    return f'//*[contains(concat(" ",normalize-space(@class)," "),concat(" ","{sel}"," "))]'
 
 
 @dataclass
@@ -94,40 +46,32 @@ class RateLimiter:
 
 
 def extract_data(html_content: str, selectors: list[str], url: str, domain: str) -> list[dict[str, str]]:
-    """Extrae datos del HTML usando CSS selectors (convertidos a XPath)."""
-    tree = etree.HTML(html_content)
-    if tree is None:
+    """Extrae datos del HTML usando selectolax CSS selectors."""
+    tree = HTMLParser(html_content)
+    if not tree.root:
         return []
 
     results: list[dict[str, str]] = []
 
-    # Encontrar el número máximo de elementos entre todos los selectors
+    # Encontrar matches por selector
     all_matches = []
     for sel in selectors:
-        try:
-            xpath = _css_to_xpath(sel)
-            matches = tree.xpath(xpath)
-        except Exception as e:
-            logger.warning("Selector '%s' falló: %s", sel, e)
-            matches = []
-        all_matches.append(matches)
+        matches = tree.css(sel)
+        all_matches.append(matches if matches else [])
 
     max_len = max((len(m) for m in all_matches), default=0)
 
     for i in range(max_len):
         row: dict[str, str] = {"_source_url": url, "_source_domain": domain}
         for sel, matches in zip(selectors, all_matches):
-            # Extraer nombre descriptivo del selector para la key
-            raw = sel.strip().lstrip(".#").split("[")[0]
-            if "." in raw:
-                # h2.title → "title" (la parte del class es más descriptiva)
-                clean_sel = raw.split(".")[-1]
-            else:
-                clean_sel = raw
+            # Limpiar selector para usar como key
+            clean_sel = sel.strip().lstrip(".#").split("[")[0]
+            if "." in clean_sel:
+                clean_sel = clean_sel.split(".")[-1]
+
             if i < len(matches):
-                el = matches[i]
-                text = etree.tostring(el, method="text", encoding="unicode").strip()
-                row[clean_sel] = text
+                node = matches[i]
+                row[clean_sel] = node.text(strip=True)
             else:
                 row[clean_sel] = ""
         results.append(row)
@@ -177,7 +121,7 @@ async def fetch_url(
             logger.warning("Connection error for %s: %s (attempt %d)", url, e, attempt + 1)
             if attempt == config.max_retries - 1:
                 return ScrapeResult(url=url, domain=domain, data=[], status_code=0, error=str(e))
-            await asyncio.sleep(2 ** attempt)  # backoff exponencial
+            await asyncio.sleep(2 ** attempt)
 
     return ScrapeResult(url=url, domain=domain, data=[], status_code=0, error="Max retries exceeded")
 
