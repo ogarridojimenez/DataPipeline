@@ -1,13 +1,14 @@
 # Roadmap — DataPipeline
 
 ## Hecho ✅
-- (nada aún)
+| # | Feature | Descripción | Commit |
+|---|---------|-------------|--------|
+| 001 | ETL Core | Scraping (httpx+lxml) + process + export + CLI | 71738f0 |
 
 ## Siguiente 🔜
 | # | Feature | Descripción |
 |---|---------|-------------|
-| 001 | ETL Core | Scraping + process + export (fundación) |
-| 002 | Dashboard | Streamlit visualización interactiva |
+| 002 | Dashboard | Streamlit + Plotly visualización interactiva |
 | 003 | Docker + CI | Dockerfile + GitHub Actions schedule |
 
 ## Backlog 💡
@@ -15,3 +16,4 @@
 - Exportación a más formatos (parquet)
 - Alerts por webhook cuando hay cambios significativos
 - Deduplicación incremental (no re-scrape completo)
+- pandas para procesamiento avanzado (requiere instalación)
