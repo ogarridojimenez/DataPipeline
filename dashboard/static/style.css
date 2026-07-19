@@ -1,0 +1,36 @@
+:root {
+    --bg: #0f172a; --surface: #1e293b; --text: #e2e8f0;
+    --accent: #3b82f6; --green: #10b981; --border: #334155;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: var(--surface); border-bottom: 1px solid var(--border); }
+nav h1 { font-size: 1.2rem; }
+nav .nav-links { display: flex; gap: 1rem; align-items: center; }
+nav a { color: var(--text); text-decoration: none; }
+.btn { background: var(--accent); padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; }
+.btn:hover { opacity: 0.85; }
+main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; text-align: center; }
+.stat-card h3 { font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.5rem; }
+.stat-value { font-size: 1.8rem; font-weight: 700; color: var(--accent); }
+
+.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; }
+.chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+.chart-container.full-width { grid-column: 1 / -1; }
+.chart-container h3 { font-size: 0.9rem; margin-bottom: 0.8rem; color: #94a3b8; }
+
+.data-table { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+.data-table h3 { font-size: 0.9rem; margin-bottom: 0.8rem; color: #94a3b8; }
+.table-controls { margin-bottom: 0.8rem; }
+select { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 0.4rem 0.8rem; border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 0.6rem; text-align: left; border-bottom: 1px solid var(--border); }
+th { color: #94a3b8; font-weight: 600; }
+
+@media (max-width: 768px) {
+    .charts-grid { grid-template-columns: 1fr; }
+    nav { flex-direction: column; gap: 0.5rem; }
+}

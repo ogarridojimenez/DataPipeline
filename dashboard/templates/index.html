@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="stats-grid">
+    <div class="stat-card">
+        <h3>Registros</h3>
+        <p class="stat-value">{{ stats.total_records }}</p>
+    </div>
+    <div class="stat-card">
+        <h3>Dominios</h3>
+        <p class="stat-value">{{ stats.unique_domains }}</p>
+    </div>
+    <div class="stat-card">
+        <h3>URLs</h3>
+        <p class="stat-value">{{ stats.unique_urls }}</p>
+    </div>
+    <div class="stat-card">
+        <h3>Rango</h3>
+        <p class="stat-value">{{ stats.date_range.min[:10] if stats.date_range.min else 'N/A' }}</p>
+    </div>
+</section>
+
+<section class="charts-grid">
+    <div class="chart-container">
+        <h3>Top Items</h3>
+        <canvas id="topChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3>Dominios</h3>
+        <canvas id="domainChart"></canvas>
+    </div>
+    <div class="chart-container full-width">
+        <h3>Línea Temporal</h3>
+        <canvas id="timeChart"></canvas>
+    </div>
+</section>
+
+<section class="data-table">
+    <h3>Registros recientes</h3>
+    <div class="table-controls">
+        <select id="domainFilter" onchange="filterRecords()">
+            <option value="">Todos los dominios</option>
+            {% for d in domains %}
+            <option value="{{ d.domain }}">{{ d.domain }} ({{ d.count }})</option>
+            {% endfor %}
+        </select>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Dominio</th>
+                <th>Datos</th>
+                <th>Fecha</th>
+            </tr>
+        </thead>
+        <tbody id="recordsBody">
+        </tbody>
+    </table>
+</section>
+
+<script>
+// Top Items Chart
+const topLabels = {{ top_items | map(attribute='val') | list | tojson }};
+const topData = {{ top_items | map(attribute='cnt') | list | tojson }};
+
+new Chart(document.getElementById('topChart'), {
+    type: 'bar',
+    data: {
+        labels: topLabels,
+        datasets: [{
+            label: 'Frecuencia',
+            data: topData,
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            borderColor: 'rgba(59, 130, 246, 1)',
+            borderWidth: 1
+        }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } } }
+});
+
+// Domain Chart
+const domLabels = {{ domains | map(attribute='domain') | list | tojson }};
+const domData = {{ domains | map(attribute='count') | list | tojson }};
+
+new Chart(document.getElementById('domainChart'), {
+    type: 'doughnut',
+    data: {
+        labels: domLabels,
+        datasets: [{
+            data: domData,
+            backgroundColor: ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899']
+        }]
+    },
+    options: { responsive: true }
+});
+
+// Time Series
+const tsLabels = {{ timeseries | map(attribute='date') | list | tojson }};
+const tsData = {{ timeseries | map(attribute='count') | list | tojson }};
+
+new Chart(document.getElementById('timeChart'), {
+    type: 'line',
+    data: {
+        labels: tsLabels,
+        datasets: [{
+            label: 'Registros/día',
+            data: tsData,
+            borderColor: 'rgba(16, 185, 129, 1)',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            fill: true, tension: 0.3
+        }]
+    },
+    options: { responsive: true }
+});
+
+// Records table
+async function filterRecords(domain) {
+    if (typeof domain === "undefined") domain = document.getElementById('domainFilter').value;
+    const url = `/api/records?limit=50${domain ? "&domain=" + domain : ""}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const tbody = document.getElementById('recordsBody');
+    tbody.innerHTML = data.map(r => {
+        const d = JSON.parse(r.data);
+        const summary = Object.entries(d).slice(0, 3).map(([k,v]) => `<b>${k}:</b> ${v}`).join(', ');
+        return `<tr><td>${r.id}</td><td>${r.source_domain}</td><td>${summary}</td><td>${(r.scraped_at||'').slice(0,10)}</td></tr>`;
+    }).join('');
+}
+filterRecords();
+</script>
+{% endblock %}
