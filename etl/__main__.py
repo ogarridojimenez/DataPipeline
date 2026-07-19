@@ -43,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     dp.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
     dp.add_argument("--port", type=int, default=8501, help="Puerto del servidor")
     dp.add_argument("--host", type=str, default="127.0.0.1", help="Host del servidor")
+    dp.add_argument("--mode", choices=["starlette", "streamlit"], default="streamlit",
+                    help="Motor del dashboard (starlette=HTML+Chart.js, streamlit=Streamlit+Plotly)")
 
     return parser
 
@@ -84,16 +86,27 @@ def main() -> None:
         run_export(Path(args.db), config, fmt=args.format)
 
     elif args.command == "dashboard":
-        import uvicorn
-        from dashboard.app import app
+        if args.mode == "streamlit":
+            import subprocess
+            import os
+            env = os.environ.copy()
+            env["ETL_DB_PATH"] = args.db
+            app_path = str(Path(__file__).parent.parent / "dashboard" / "streamlit_app.py")
+            print(f"🌐 Dashboard Streamlit: http://{args.host}:{args.port}")
+            subprocess.run([
+                sys.executable, "-m", "streamlit", "run", app_path,
+                "--server.port", str(args.port),
+                "--server.address", args.host,
+            ], env=env)
+        else:
+            import uvicorn
+            from dashboard.app import app
+            from dashboard import app as dash_app
+            from pathlib import Path as _P
+            dash_app.DB_PATH = _P(args.db)
 
-        # Override DB_PATH
-        from dashboard import app as dash_app
-        from pathlib import Path as _P
-        dash_app.DB_PATH = _P(args.db)
-
-        print(f"🌐 Dashboard: http://{args.host}:{args.port}")
-        uvicorn.run(dash_app.app, host=args.host, port=args.port)
+            print(f"🌐 Dashboard Starlette: http://{args.host}:{args.port}")
+            uvicorn.run(dash_app.app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
