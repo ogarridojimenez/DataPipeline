@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from etl.config import validate_db_path
 from etl.process import expand_json_records
 
 # --- Configuración ---
@@ -99,6 +100,12 @@ db_path_input = st.sidebar.text_input(
     key="db_path_input",
 )
 st.session_state.db_path = db_path_input
+
+# Validate path
+try:
+    validate_db_path(st.session_state.db_path)
+except ValueError as e:
+    st.sidebar.error(f"Ruta inválida: {e}")
 
 # Data source selector
 data_source = st.sidebar.radio(

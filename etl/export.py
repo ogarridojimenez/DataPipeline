@@ -52,13 +52,27 @@ def load_processed_df(db_path: Path) -> pd.DataFrame:
     return df
 
 
-def run_export(db_path: Path, config: ProcessConfig, fmt: str = "both") -> None:
-    """Exporta datos procesados a CSV, JSON y/o Parquet."""
+def run_export(
+    db_path: Path | None = None,
+    config: ProcessConfig | None = None,
+    fmt: str = "both",
+    df: pd.DataFrame | None = None,
+) -> None:
+    """Exporta datos procesados a CSV, JSON y/o Parquet.
+
+    Args:
+        db_path: Ruta SQLite (ignorado si se pasa df).
+        config: Configuración de procesamiento (usa defaults si None).
+        fmt: Formato de exportación (csv, json, both, parquet).
+        df: DataFrame opcional para evitar re-lectura de SQLite.
+    """
+    if config is None:
+        config = ProcessConfig()
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     if fmt == "parquet":
-        # Para parquet usamos pandas + pyarrow
-        df = load_processed_df(db_path)
+        if df is None:
+            df = load_processed_df(db_path or Path("data/pipeline.db"))
         if df.empty:
             logger.warning("No hay datos para exportar")
             return
@@ -69,7 +83,7 @@ def run_export(db_path: Path, config: ProcessConfig, fmt: str = "both") -> None:
         logger.info("Exportación completa (%s)", fmt)
         return
 
-    columns, rows = load_processed(db_path)
+    columns, rows = load_processed(db_path or Path("data/pipeline.db"))
     if not rows:
         logger.warning("No hay datos para exportar")
         return

@@ -34,13 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         help="Evitar duplicados por hash",
     )
-    sp.add_argument("--webhook", type=str, default=None, help="URL de webhook Slack/Discord para notificar")
+    sp.add_argument("--webhook", type=str, default=None, help="URL de webhook (o variable ETL_WEBHOOK_URL)")
     sp.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
 
     # --- process ---
     pp = sub.add_parser("process", help="Limpiar y transformar datos")
     pp.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
-    pp.add_argument("--outlier-threshold", type=float, default=3.0, help="Umbrales std-dev para outliers")
+    pp.add_argument("--outlier-threshold", type=float, default=3.0, help="Umbral std-dev para outliers")
     pp.add_argument("--fill-nulls", choices=["drop", "fill", "mean", "median"], default="drop")
 
     # --- export ---
@@ -73,10 +73,10 @@ def main() -> None:
         sys.exit(0)
 
     if args.command == "scrape":
-        from etl.config import ScrapeConfig
+        from etl.config import get_scrape_config
         from etl.scrape import run_scrape
 
-        config = ScrapeConfig(
+        config = get_scrape_config(
             timeout=args.timeout,
             rate_limit_delay=args.rate_limit,
             db_path=Path(args.db),
@@ -101,7 +101,7 @@ def main() -> None:
         from etl.export import run_export
 
         config = ProcessConfig(output_dir=Path(args.output_dir))
-        run_export(Path(args.db), config, fmt=args.format)
+        run_export(db_path=Path(args.db), config=config, fmt=args.format)
 
     elif args.command == "dashboard":
         if args.mode == "streamlit":
