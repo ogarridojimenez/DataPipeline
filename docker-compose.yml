@@ -1,24 +1,95 @@
-version: "3.8"
+# DataPipeline — Docker Compose
+# Uso:
+#   docker compose up -d              # Inicia dashboard + api
+#   docker compose run --rm etl --help  # CLI ETL
+#   docker compose --profile scheduler up -d  # + scheduler automático
 
 services:
-  app:
+
+  # ── Dashboard Streamlit (interfaz principal) ──
+  dashboard:
     build: .
+    image: datapipeline:latest
+    container_name: datapipeline-dashboard
     ports:
       - "8501:8501"
     volumes:
-      - ./data:/app/data
+      - data:/app/data
     environment:
       - ETL_DB_PATH=/app/data/pipeline.db
+      - DASHBOARD_DB_PATH=/app/data/pipeline.db
+      - PYTHONUNBUFFERED=1
+    command: ["dashboard", "--mode", "streamlit", "--host", "0.0.0.0", "--port", "8501"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
+    networks:
+      - datapipeline
 
-  # Run ETL pipeline manually
+  # ── API REST (FastAPI, para integraciones) ──
+  api:
+    build: .
+    image: datapipeline:latest
+    container_name: datapipeline-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/app/data
+    environment:
+      - ETL_DB_PATH=/app/data/pipeline.db
+      - PYTHONUNBUFFERED=1
+    command: ["api", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').status)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - datapipeline
+
+  # ── ETL CLI (bajo demanda, sin puertos) ──
   etl:
     build: .
-    volumes:
-      - ./data:/app/data
-    environment:
-      - ETL_DB_PATH=/app/data/pipeline.db
-    entrypoint: ["python", "-m", "etl"]
-    command: ["scrape", "http://example.com", "--selectors", "h2"]
+    image: datapipeline:latest
+    container_name: datapipeline-etl
     profiles:
       - tools
+    volumes:
+      - data:/app/data
+    environment:
+      - ETL_DB_PATH=/app/data/pipeline.db
+      - PYTHONUNBUFFERED=1
+    entrypoint: ["python", "-m", "etl"]
+    networks:
+      - datapipeline
+
+  # ── Scheduler automático (perfil opcional) ──
+  scheduler:
+    build: .
+    image: datapipeline:latest
+    container_name: datapipeline-scheduler
+    profiles:
+      - scheduler
+    volumes:
+      - data:/app/data
+    environment:
+      - ETL_DB_PATH=/app/data/pipeline.db
+      - PYTHONUNBUFFERED=1
+    command: ["schedule", "--cron", "0 */6 * * *"]
+    restart: unless-stopped
+    networks:
+      - datapipeline
+
+volumes:
+  data:
+    name: datapipeline_data
+
+networks:
+  datapipeline:
+    name: datapipeline_net
