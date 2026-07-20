@@ -16,6 +16,7 @@ def assert_(condition, msg="Assertion failed"):
 
 
 def run_tests():
+    import json
     passed = 0
     failed = 0
     errors = []
@@ -103,6 +104,7 @@ def run_tests():
     from etl.config import ProcessConfig
 
     def make_test_db(tmpdir):
+        import json
         db_path = Path(tmpdir) / "test.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute("""CREATE TABLE raw_data (
@@ -238,6 +240,20 @@ def run_tests():
                 failed += 1
                 errors.append((f"integration.{name}", e))
 
+        # --- parquet export test ---
+        try:
+            parquet_path = output_dir / "datapipeline_export.parquet"
+            run_export(db_path, ProcessConfig(output_dir=output_dir), fmt="parquet")
+            assert_(parquet_path.exists(), f"Parquet file not found: {parquet_path}")
+            df_parquet = pd.read_parquet(parquet_path)
+            assert_(len(df_parquet) >= 2, f"Expected >=2 rows in parquet, got {len(df_parquet)}")
+            print(f"  ✓ parquet_export")
+            passed += 1
+        except Exception as e:
+            print(f"  ✗ parquet_export: {e}")
+            failed += 1
+            errors.append((f"integration.parquet_export", e))
+
     # ===== CLI test =====
     print()
     print("=" * 60)
@@ -281,13 +297,13 @@ def run_tests():
         r1 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x":"1"},{"x":"2"}], status_code=200)
         r2 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x":"1"},{"x":"2"}], status_code=200)
         r3 = ScrapeResult(url="http://b.com", domain="b.com", data=[{"x":"3"},{"x":"4"}], status_code=200)
-        n1 = save_to_sqlite([r1, r2, r3], _tdb, incremental=True)
+        n1, _ = save_to_sqlite([r1, r2, r3], _tdb, incremental=True)
         assert_(n1 == 4, f"Expected 4 items (r1=2 skip dup, r3=2), got {n1}")
         _c1 = sqlite3.connect(_tdb).execute("SELECT COUNT(*) FROM raw_data").fetchone()[0]
         assert_(_c1 == 2, f"Expected 2 rows (no hash UNIQUE, dedup by SELECT), got {_c1}")
-        n2 = save_to_sqlite([r1], _tdb, incremental=True)
+        n2, _ = save_to_sqlite([r1], _tdb, incremental=True)
         assert_(n2 == 0, f"Expected 0 new on repeat, got {n2}")
-        n3 = save_to_sqlite([r1], _tdb, incremental=False)
+        n3, _ = save_to_sqlite([r1], _tdb, incremental=False)
         assert_(n3 == 2, f"Expected 2 items with no-incremental, got {n3}")
         passed += 1
         print(f"  ✓ incremental_dedup_works")
@@ -295,6 +311,82 @@ def run_tests():
         print(f"  ✗ incremental_dedup_works: {e}")
         failed += 1
         errors.append(("dedup_test", e))
+
+    # ===== test_notify.py =====
+    print("=" * 60)
+    print("test_notify.py")
+    print("=" * 60)
+    try:
+        import http.server
+        import threading
+        import json
+        from etl.notify import send_webhook, notify_scrape_complete
+
+        _received: list[dict] = []
+
+        class _Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length)
+                _received.append(json.loads(body))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        _server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+        _port = _server.server_port
+        _t = threading.Thread(target=_server.handle_request, daemon=True)
+        _t.start()
+
+        _ok = send_webhook(f"http://127.0.0.1:{_port}", "test msg", {"key": "val"})
+        _t.join(timeout=3)
+        assert_(_ok, "send_webhook should return True")
+        assert_(len(_received) == 1, f"Expected 1 request, got {len(_received)}")
+        assert_(_received[0]["text"] == "test msg", f"Wrong text: {_received[0]}")
+        passed += 1
+        print(f"  ✓ webhook_send")
+    except Exception as e:
+        print(f"  ✗ webhook_send: {e}")
+        failed += 1
+        errors.append(("notify_test", e))
+
+    # ===== test_advanced_pandas.py =====
+    print("=" * 60)
+    print("test_advanced_pandas.py")
+    print("=" * 60)
+    try:
+        import pandas as _pd
+        from etl.process import compute_summary, group_by_domain, pipeline_pipe
+        _df = _pd.DataFrame({
+            "_source_domain": ["a.com","a.com","b.com","b.com"],
+            "value": [10, 20, 30, 40],
+            "category": ["x","y","x","y"],
+        })
+        _s = compute_summary(_df)
+        assert_(_s["total_records"] == 4, f"summary count: {_s}")
+        assert_(_s["numeric_columns"] == 1, f"numeric cols: {_s}")
+        assert_("a.com" in _s["top_domains"], f"top_domains: {_s}")
+        passed += 1
+        print(f"  ✓ compute_summary")
+        _gb = group_by_domain(_df)
+        assert_(len(_gb) == 2, f"group_by should have 2 domains, got {len(_gb)}")
+        assert_("value_mean" in _gb.columns, f"column value_mean missing: {_gb.columns.tolist()}")
+        passed += 1
+        print(f"  ✓ group_by_domain")
+        _filtered = pipeline_pipe(_df, [{"type": "filter", "params": {"column": "value", "op": "gt", "value": 20}}])
+        assert_(len(_filtered) == 2, f"filter >20 expected 2, got {len(_filtered)}")
+        passed += 1
+        print(f"  ✓ pipeline_pipe_filter")
+        _ranked = pipeline_pipe(_df, [{"type": "add_rank", "params": {"column": "value", "name": "r"}}])
+        assert_("r" in _ranked.columns, f"rank column missing")
+        passed += 1
+        print(f"  ✓ pipeline_pipe_rank")
+    except Exception as e:
+        print(f"  ✗ advanced_pandas: {e}")
+        failed += 1
+        errors.append(("advanced_pandas", e))
 
     # ===== test_concurrency.py =====
     print("=" * 60)

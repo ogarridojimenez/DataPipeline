@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--rate-limit", type=float, default=1.0, help="Delay entre requests (s)")
     sp.add_argument("--concurrency", type=int, default=10, help="Máximo requests simultáneos")
     sp.add_argument("--incremental/--no-incremental", dest="incremental", default=True, action=argparse.BooleanOptionalAction, help="Evitar duplicados por hash")
+    sp.add_argument("--webhook", type=str, default=None, help="URL de webhook Slack/Discord para notificar")
     sp.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
 
     # --- process ---
@@ -38,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     ep = sub.add_parser("export", help="Exportar datos procesados a CSV/JSON")
     ep.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
     ep.add_argument("--output-dir", type=str, default="data/processed", help="Directorio de salida")
-    ep.add_argument("--format", choices=["csv", "json", "both"], default="both")
+    ep.add_argument("--format", choices=["csv", "json", "both", "parquet"], default="both")
 
     # --- dashboard ---
     dp = sub.add_parser("dashboard", help="Abrir dashboard web interactivo")
@@ -69,6 +70,7 @@ def main() -> None:
             db_path=Path(args.db),
             max_concurrent=args.concurrency,
             incremental=args.incremental,
+            webhook_url=args.webhook,
         )
         asyncio.run(run_scrape(args.urls, args.selectors, config))
 

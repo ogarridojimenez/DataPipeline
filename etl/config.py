@@ -26,6 +26,7 @@ class ScrapeConfig:
     user_agents: list[str] = field(default_factory=lambda: USER_AGENTS.copy())
     max_concurrent: int = 10  # máximo de requests simultáneos
     incremental: bool = True  # evitar duplicados
+    webhook_url: str | None = None  # notificar scraping completado
 
 
 @dataclass

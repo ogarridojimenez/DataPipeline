@@ -1,4 +1,4 @@
-"""Fase de procesamiento: pandas data cleaning + detección outliers."""
+"""Transformaciones avanzadas con pandas: stats, group-by, agregaciones."""
 
 from __future__ import annotations
 
@@ -93,6 +93,129 @@ def clean_data(df: pd.DataFrame, config: ProcessConfig) -> pd.DataFrame:
     return df
 
 
+def compute_summary(df: pd.DataFrame) -> dict:
+    """Calcula estadísticas resumen del DataFrame."""
+    if df.empty:
+        return {}
+
+    non_meta = [c for c in df.columns if not c.startswith("_")]
+    num_cols = df[non_meta].select_dtypes(include=["number"]).columns.tolist()
+    cat_cols = df[non_meta].select_dtypes(include=["object"]).columns.tolist()
+
+    summary: dict = {
+        "total_records": len(df),
+        "numeric_columns": len(num_cols),
+        "categorical_columns": len(cat_cols),
+    }
+
+    if num_cols:
+        summary["numeric_stats"] = {
+            col: {
+                "mean": round(df[col].mean(), 2),
+                "median": round(df[col].median(), 2),
+                "std": round(df[col].std(), 2),
+                "min": round(df[col].min(), 2),
+                "max": round(df[col].max(), 2),
+            }
+            for col in num_cols
+        }
+
+    if cat_cols:
+        summary["categorical_top"] = {
+            col: df[col].value_counts().head(3).to_dict()
+            for col in cat_cols
+        }
+
+    # Dominio stats
+    if "_source_domain" in df.columns:
+        summary["top_domains"] = df["_source_domain"].value_counts().head(5).to_dict()
+
+    return summary
+
+
+def group_by_domain(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrupa por dominio y calcula métricas agregadas."""
+    if df.empty or "_source_domain" not in df.columns:
+        return pd.DataFrame()
+
+    non_meta = [c for c in df.columns if not c.startswith("_")]
+    num_cols = df[non_meta].select_dtypes(include=["number"]).columns.tolist()
+
+    if not num_cols:
+        # Si no hay numéricas, contar registros
+        return df.groupby("_source_domain").size().reset_index(name="count")
+
+    aggs: dict[str, str] = {col: ["mean", "min", "max", "count"] for col in num_cols}
+    result = df.groupby("_source_domain").agg(aggs)
+    result.columns = [f"{col}_{agg}" for col, agg in result.columns]
+    return result.reset_index()
+
+
+def pipeline_pipe(df: pd.DataFrame, steps: list[dict]) -> pd.DataFrame:
+    """Ejecuta una serie de pipes de transformación configurables.
+
+    Cada step es un dict con:
+      - type: "filter" | "sort" | "top_n" | "add_rank" | "normalize"
+      - params: dict con los parámetros de la operación
+    """
+    result = df.copy()
+    for step in steps:
+        t = step["type"]
+        p = step.get("params", {})
+
+        if t == "filter":
+            col = p.get("column")
+            op = p.get("op", "eq")
+            val = p.get("value")
+            if col in result.columns:
+                if op == "eq":
+                    result = result[result[col] == val]
+                elif op == "gt":
+                    result = result[result[col] > val]
+                elif op == "gte":
+                    result = result[result[col] >= val]
+                elif op == "lt":
+                    result = result[result[col] < val]
+                elif op == "lte":
+                    result = result[result[col] <= val]
+                elif op == "ne":
+                    result = result[result[col] != val]
+                elif op == "contains":
+                    result = result[result[col].astype(str).str.contains(str(val), na=False)]
+        elif t == "sort":
+            col = p.get("column")
+            asc = p.get("ascending", True)
+            if col in result.columns:
+                result = result.sort_values(by=col, ascending=asc)
+        elif t == "top_n":
+            col = p.get("column")
+            n = p.get("n", 10)
+            if col in result.columns:
+                result = result.nlargest(n, col)
+        elif t == "add_rank":
+            col = p.get("column")
+            name = p.get("name", "rank")
+            asc = p.get("ascending", True)
+            if col in result.columns:
+                result[name] = result[col].rank(ascending=asc)
+        elif t == "normalize":
+            col = p.get("column")
+            name = p.get("name", None) or f"{col}_norm"
+            method = p.get("method", "minmax")  # minmax | zscore
+            if col in result.columns:
+                if method == "minmax":
+                    mn, mx = result[col].min(), result[col].max()
+                    if mx != mn:
+                        result[name] = (result[col] - mn) / (mx - mn)
+                    else:
+                        result[name] = 0
+                elif method == "zscore":
+                    mean, std = result[col].mean(), result[col].std()
+                    result[name] = (result[col] - mean) / std if std > 0 else 0
+
+    return result
+
+
 def save_processed(df: pd.DataFrame, db_path) -> None:
     """Guarda DataFrame procesado en SQLite."""
     conn = sqlite3.connect(str(db_path))
@@ -126,9 +249,10 @@ def save_processed(df: pd.DataFrame, db_path) -> None:
     conn.close()
 
 
-def run_process(db_path, config: ProcessConfig) -> None:
+def run_process(db_path, config: ProcessConfig, verbose: bool = True) -> None:
     """Ejecuta el pipeline de procesamiento completo."""
-    print(f"⚙ Procesando datos de {db_path}...")
+    if verbose:
+        print(f"⚙ Procesando datos de {db_path}...")
     df = load_raw_data(db_path)
 
     if df.empty:
@@ -136,5 +260,24 @@ def run_process(db_path, config: ProcessConfig) -> None:
         return
 
     cleaned = clean_data(df, config)
+
+    # Resumen avanzado
+    summary = compute_summary(cleaned)
+    if verbose and summary:
+        print(f"  📊 Registros: {summary['total_records']}")
+        print(f"  🔢 Columnas numéricas: {summary.get('numeric_columns', 0)}")
+        print(f"  📝 Columnas categóricas: {summary.get('categorical_columns', 0)}")
+        if "top_domains" in summary:
+            print(f"  🌐 Top dominios: {', '.join(summary['top_domains'].keys())}")
+        if summary.get("numeric_stats"):
+            for col, stats in summary["numeric_stats"].items():
+                print(f"  📈 {col}: media={stats['mean']}, min={stats['min']}, max={stats['max']}")
+
+    # Group by dominio
+    gb = group_by_domain(cleaned)
+    if verbose and not gb.empty:
+        print(f"  🔗 Agrupación por dominio: {len(gb)} grupos")
+
     save_processed(cleaned, db_path)
-    print(f"✓ Procesamiento completo: {len(cleaned)} registros limpios")
+    if verbose:
+        print(f"✓ Procesamiento completo: {len(cleaned)} registros limpios")

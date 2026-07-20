@@ -1,4 +1,4 @@
-"""Fase de exportación: SQLite → CSV + JSON (stdlib)."""
+"""Fase de exportación: SQLite → CSV + JSON + Parquet."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
+
+import pandas as pd
 
 from etl.config import ProcessConfig
 
@@ -34,9 +36,39 @@ def load_processed(db_path: Path) -> tuple[list[str], list[dict]]:
     return columns, rows
 
 
+def load_processed_df(db_path: Path) -> pd.DataFrame:
+    """Carga datos procesados desde SQLite y retorna un DataFrame de pandas.
+
+    Primero intenta con la tabla ``processed_data``; si no existe, usa ``raw_data``.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        df = pd.read_sql_query("SELECT * FROM processed_data", conn)
+    except Exception:
+        logger.warning("Tabla 'processed_data' no existe, usando raw_data")
+        conn.close()
+        conn = sqlite3.connect(str(db_path))
+        df = pd.read_sql_query("SELECT * FROM raw_data", conn)
+    conn.close()
+    return df
+
+
 def run_export(db_path: Path, config: ProcessConfig, fmt: str = "both") -> None:
-    """Exporta datos procesados a CSV y/o JSON."""
+    """Exporta datos procesados a CSV, JSON y/o Parquet."""
     config.output_dir.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "parquet":
+        # Para parquet usamos pandas + pyarrow
+        df = load_processed_df(db_path)
+        if df.empty:
+            print("⚠ No hay datos para exportar")
+            return
+        base_name = "datapipeline_export"
+        parquet_path = config.output_dir / f"{base_name}.parquet"
+        df.to_parquet(parquet_path, index=False)
+        print(f"✓ Parquet: {parquet_path} ({len(df)} filas)")
+        print(f"✓ Exportación completa ({fmt})")
+        return
 
     columns, rows = load_processed(db_path)
     if not rows:

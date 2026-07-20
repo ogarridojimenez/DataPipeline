@@ -172,7 +172,7 @@ def save_to_sqlite(results: list[ScrapeResult], db_path, incremental: bool = Tru
     conn.close()
     if incremental and skipped:
         print(f"  ↻ Saltados por duplicado: {skipped} filas")
-    return total_rows
+    return total_rows, skipped
 
 
 async def run_scrape(urls: list[str], selectors: list[str], config: ScrapeConfig) -> None:
@@ -189,7 +189,7 @@ async def run_scrape(urls: list[str], selectors: list[str], config: ScrapeConfig
     tasks = [fetch_with_limit(url) for url in urls]
     results = await asyncio.gather(*tasks)
 
-    total = save_to_sqlite(results, config.db_path, incremental=config.incremental)
+    total, skipped = save_to_sqlite(results, config.db_path, incremental=config.incremental)
 
     success = sum(1 for r in results if not r.error)
     failed = len(results) - success
@@ -199,3 +199,16 @@ async def run_scrape(urls: list[str], selectors: list[str], config: ScrapeConfig
         for r in results:
             if r.error:
                 print(f"  - {r.url}: {r.error}")
+
+    # Webhook notification
+    if config.webhook_url:
+        from etl.notify import notify_scrape_complete
+
+        notify_scrape_complete(
+            config.webhook_url,
+            total_urls=len(results),
+            success_count=success,
+            total_rows=total,
+            skipped=skipped,
+            db_path=str(config.db_path),
+        )
