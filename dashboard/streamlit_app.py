@@ -175,13 +175,30 @@ except Exception:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔍 Filtros")
 
-# Domain filter
-domains = ["All"] + sorted(df["_source_domain"].unique().tolist()) if "_source_domain" in df.columns else ["All"]
-selected_domain = st.sidebar.selectbox("Dominio", domains, index=0)
+# Text search
+search_query = st.sidebar.text_input("🔎 Búsqueda textual", placeholder="Escribe para filtrar...")
 
-# Apply domain filter
-if selected_domain != "All" and "_source_domain" in df.columns:
-    df = df[df["_source_domain"] == selected_domain]
+# Dynamic multi-column filters
+non_meta_cols = [c for c in df.columns if not c.startswith("_")]
+string_cols = df.select_dtypes(include=["object", "string"]).columns.tolist()
+string_cols = [c for c in string_cols if c in non_meta_cols][:6]  # limit to 6
+
+col_filters: dict[str, str | None] = {}
+for col_name in string_cols:
+    unique_vals = sorted(df[col_name].dropna().unique().tolist())
+    if len(unique_vals) > 1 and len(unique_vals) <= 100:
+        opts = ["All"] + [str(v) for v in unique_vals[:50]]
+        selected = st.sidebar.selectbox(f"{col_name}", opts, key=f"filt_{col_name}")
+        col_filters[col_name] = None if selected == "All" else selected
+
+# Apply filters
+for col, val in col_filters.items():
+    if val is not None:
+        df = df[df[col].astype(str) == val]
+
+if search_query:
+    mask = df.astype(str).apply(lambda row: row.str.contains(search_query, case=False, na=False).any(), axis=1)
+    df = df[mask]
 
 # --- Main content ---
 st.title("📊 DataPipeline Dashboard")
@@ -212,107 +229,75 @@ with col4:
 
 st.markdown("---")
 
-# --- Charts ---
-# Identify columns (exclude metadata)
-meta_cols = [c for c in df.columns if c.startswith("_")]
-data_cols = [c for c in df.columns if not c.startswith("_")]
+# --- Configurable Charts ---
+st.markdown("### 📈 Gráficos configurables")
 
-if not data_cols:
-    st.info("No hay columnas de datos para graficar.")
-else:
-    chart_col1, chart_col2 = st.columns(2)
+with st.expander("⚙ Configurar gráfico", expanded=False):
+    chart_type = st.selectbox(
+        "Tipo de gráfico",
+        ["Barra", "Línea", "Dispersión", "Histograma", "Pastel", "Box"],
+        key="chart_type",
+    )
+    all_cols = df.columns.tolist()
+    x_col = st.selectbox("Eje X / Categoría", all_cols, key="chart_x")
+    y_hint = "Eje Y (opcional)" if chart_type in ("Histograma", "Pastel") else "Eje Y"
+    y_col = st.selectbox(y_hint, [None] + all_cols, key="chart_y")
+    color_col = st.selectbox("Color / Agrupar por", [None] + all_cols, key="chart_color")
 
-    # --- Bar Chart: top items ---
-    with chart_col1:
-        st.markdown("#### 📊 Top Elementos")
-        # Find the first text column for grouping
-        text_col = data_cols[0]
-        if text_col in df.columns:
-            counts = df[text_col].value_counts().head(10).reset_index()
-            counts.columns = [text_col, "count"]
-            fig_bar = px.bar(
-                counts,
-                x="count",
-                y=text_col,
-                orientation="h",
-                color="count",
-                color_continuous_scale="blues",
-            )
-            fig_bar.update_layout(
-                template="plotly_dark",
-                height=400,
-                showlegend=False,
-                margin=dict(l=10, r=10, t=10, b=10),
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+# Build the chart
+fig = None
+if chart_type == "Barra" and y_col and x_col in df.columns:
+    grp = df.groupby(x_col)[y_col].sum().reset_index().sort_values(y_col, ascending=False).head(30)
+    fig = px.bar(
+        grp,
+        x=x_col,
+        y=y_col,
+        color=color_col if color_col else None,
+        color_continuous_scale="blues" if not color_col else None,
+    )
+elif chart_type == "Línea" and y_col and x_col in df.columns:
+    grp = df.groupby(x_col)[y_col].mean().reset_index()
+    fig = px.line(grp, x=x_col, y=y_col, markers=True, color=color_col if color_col else None)
+elif chart_type == "Dispersión" and y_col and x_col in df.columns:
+    fig = px.scatter(df, x=x_col, y=y_col, color=color_col if color_col else None, opacity=0.6)
+elif chart_type == "Histograma":
+    fig = px.histogram(df, x=x_col, color=color_col if color_col else None, nbins=30)
+elif chart_type == "Pastel" and x_col in df.columns:
+    counts = df[x_col].value_counts().head(20).reset_index()
+    counts.columns = [x_col, "count"]
+    fig = px.pie(counts, names=x_col, values="count", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2)
+elif chart_type == "Box" and y_col and x_col in df.columns:
+    fig = px.box(df, x=x_col, y=y_col, color=color_col if color_col else None)
 
-    # --- Doughnut Chart: domain distribution ---
-    with chart_col2:
-        st.markdown("#### 🍩 Distribución por Dominio")
-        if "_source_domain" in df.columns:
-            domain_counts = df["_source_domain"].value_counts().reset_index()
-            domain_counts.columns = ["domain", "count"]
-            fig_donut = px.pie(
-                domain_counts,
-                names="domain",
-                values="count",
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set2,
-            )
-            fig_donut.update_layout(
-                template="plotly_dark",
-                height=400,
-                showlegend=True,
-                margin=dict(l=10, r=10, t=10, b=10),
-            )
-            st.plotly_chart(fig_donut, use_container_width=True)
+if fig:
+    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
 
-    # --- Line Chart: records over time ---
+# Retained static charts (domain + timeline) as a compact row
+st.markdown("#### 📊 Vistas rápidas")
+qc1, qc2 = st.columns(2)
+with qc1:
+    if "_source_domain" in df.columns:
+        dc = df["_source_domain"].value_counts().reset_index()
+        dc.columns = ["domain", "count"]
+        st.plotly_chart(
+            px.pie(
+                dc, names="domain", values="count", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set2
+            ).update_layout(template="plotly_dark", height=280, margin=dict(l=5, r=5, t=5, b=5)),
+            use_container_width=True,
+        )
+with qc2:
     if "_scraped_at" in df.columns:
-        st.markdown("#### 📈 Registros por Día")
         dates = pd.to_datetime(df["_scraped_at"], errors="coerce").dropna()
         if not dates.empty:
             daily = dates.dt.date.value_counts().sort_index().reset_index()
             daily.columns = ["date", "count"]
-            fig_line = px.line(
-                daily,
-                x="date",
-                y="count",
-                markers=True,
-                color_discrete_sequence=["#4fc3f7"],
+            st.plotly_chart(
+                px.line(daily, x="date", y="count", markers=True, color_discrete_sequence=["#4fc3f7"]).update_layout(
+                    template="plotly_dark", height=280, margin=dict(l=5, r=5, t=5, b=5)
+                ),
+                use_container_width=True,
             )
-            fig_line.update_layout(
-                template="plotly_dark",
-                height=300,
-                showlegend=False,
-                margin=dict(l=10, r=10, t=10, b=10),
-                xaxis_title="Fecha",
-                yaxis_title="Registros",
-            )
-            st.plotly_chart(fig_line, use_container_width=True)
-
-    # --- Multi-column charts ---
-    num_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    num_cols = [c for c in num_cols if not c.startswith("_")]
-
-    if len(num_cols) >= 2:
-        st.markdown("#### 🔬 Distribución Numérica")
-        cols = st.columns(min(len(num_cols), 4))
-        for i, col_name in enumerate(num_cols[:4]):
-            with cols[i]:
-                fig_hist = px.histogram(
-                    df,
-                    x=col_name,
-                    nbins=20,
-                    color_discrete_sequence=["#81c784"],
-                )
-                fig_hist.update_layout(
-                    template="plotly_dark",
-                    height=250,
-                    showlegend=False,
-                    margin=dict(l=5, r=5, t=5, b=5),
-                )
-                st.plotly_chart(fig_hist, use_container_width=True)
 
 # --- Data Table ---
 st.markdown("---")
@@ -332,7 +317,7 @@ st.dataframe(df.iloc[start:end], use_container_width=True, height=400)
 st.markdown("---")
 st.markdown("### 💾 Exportar")
 
-col_e1, col_e2 = st.columns(2)
+col_e1, col_e2, col_e3 = st.columns(3)
 
 with col_e1:
     csv_data = df.to_csv(index=False)
@@ -351,6 +336,22 @@ with col_e2:
         file_name="datapipeline_export.json",
         mime="application/json",
     )
+
+with col_e3:
+    try:
+        import plotly.io as pio
+
+        # Re-create figure for PNG capture
+        if fig:
+            png_bytes = pio.to_image(fig, format="png", width=1200, height=600, scale=2)
+            st.download_button(
+                label="📸 Exportar gráfico como PNG",
+                data=png_bytes,
+                file_name="datapipeline_chart.png",
+                mime="image/png",
+            )
+    except Exception:
+        pass
 
 # --- Footer ---
 st.markdown("---")
