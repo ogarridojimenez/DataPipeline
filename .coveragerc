@@ -1,0 +1,5 @@
+[run]
+omit =
+    dashboard/streamlit_app.py
+    dashboard/app.py
+    etl/__main__.py

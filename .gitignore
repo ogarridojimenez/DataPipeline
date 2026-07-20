@@ -9,3 +9,4 @@ data/
 *.db
 .venv/
 .streamlit/secrets.toml
+.coverage

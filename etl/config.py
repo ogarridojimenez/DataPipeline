@@ -88,17 +88,22 @@ def validate_db_path(db_path: str | Path, project_root: Path | None = None) -> P
         ValueError: Si la ruta no es válida (extensión incorrecta,
                     fuera del proyecto o directorio padre inexistente).
     """
+    if db_path is None:
+        return None
     path = Path(db_path).resolve()
 
     if path.suffix.lower() not in (".db", ".sqlite", ".sqlite3"):
         raise ValueError(f"Extensión inválida: '{path.suffix}'. Se espera .db, .sqlite o .sqlite3")
 
+    if not path.parent.exists():
+        raise ValueError(f"Directorio no existe: {path.parent}")
+
     if project_root is not None:
-        root = project_root.resolve()
+        root = Path(project_root).resolve()
         if not str(path).startswith(str(root)):
             raise ValueError(f"Ruta fuera del proyecto: {path}")
 
-    if not path.parent.exists():
-        raise ValueError(f"Directorio no existe: {path.parent}")
+    if not path.exists():
+        return None
 
     return path
