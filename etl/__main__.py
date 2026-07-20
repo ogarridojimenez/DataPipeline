@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     ep.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
     ep.add_argument("--output-dir", type=str, default="data/processed", help="Directorio de salida")
     ep.add_argument("--format", choices=["csv", "json", "both", "parquet"], default="both")
+    ep.add_argument("--since", type=str, default=None, help='Exportar solo registros >= fecha ISO (ej: "2026-07-01")')
 
     # --- dashboard ---
     dp = sub.add_parser("dashboard", help="Abrir dashboard web interactivo")
@@ -94,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp_cmd.add_argument("--urls", nargs="+", default=None, help="URLs a scrapear (para schedule)")
     sp_cmd.add_argument("--selectors", nargs="+", default=None, help="CSS selectors (para schedule)")
 
+    # --- api ---
+    ap = sub.add_parser("api", help="Iniciar servidor REST API")
+    ap.add_argument("--host", type=str, default="127.0.0.1", help="Host")
+    ap.add_argument("--port", type=int, default=8000, help="Puerto")
+    ap.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
+
     return parser
 
 
@@ -134,7 +141,7 @@ def main() -> None:
         from etl.export import run_export
 
         config = ProcessConfig(output_dir=Path(args.output_dir))
-        run_export(db_path=Path(args.db), config=config, fmt=args.format)
+        run_export(db_path=Path(args.db), config=config, fmt=args.format, since=args.since)
 
     elif args.command == "dashboard":
         if args.mode == "streamlit":
@@ -261,6 +268,11 @@ def main() -> None:
         if total == 0 and not args.dry_run:
             print("✓ No hay datos antiguos que purgar.")
         print(f"  Total: {total} registros {'(simulado)' if args.dry_run else 'eliminados'}")
+
+    elif args.command == "api":
+        from dashboard.api import serve
+
+        serve(host=args.host, port=args.port, db_path=args.db)
 
 
 if __name__ == "__main__":

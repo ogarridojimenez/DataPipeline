@@ -4,3 +4,5 @@ selectolax>=0.3
 pandas>=2.0
 plotly>=5.0
 streamlit>=1.30
+starlette>=0.30
+fastapi>=0.105

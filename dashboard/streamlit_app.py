@@ -77,6 +77,9 @@ st.markdown(
 
 
 # --- Data loading ---
+MAX_FRAME = 5000  # Máximo de filas en RAM
+
+
 def get_db_path() -> str:
     """Obtiene la ruta de la DB desde session_state o variable de entorno."""
     import os
@@ -88,14 +91,14 @@ def get_db_path() -> str:
 
 @st.cache_data
 def load_data(db_path: str) -> pd.DataFrame:
-    """Carga y expande datos de SQLite."""
+    """Carga y expande datos de SQLite (máx. MAX_FRAME filas)."""
     path = Path(db_path)
     if not path.exists():
         return pd.DataFrame()
 
     conn = sqlite3.connect(str(path))
     try:
-        df = pd.read_sql_query("SELECT * FROM raw_data", conn)
+        df = pd.read_sql_query(f"SELECT * FROM raw_data LIMIT {MAX_FRAME}", conn)
     except Exception:
         return pd.DataFrame()
     finally:
@@ -108,14 +111,14 @@ def load_data(db_path: str) -> pd.DataFrame:
 
 
 def load_processed_data(db_path: str) -> pd.DataFrame:
-    """Carga datos procesados de SQLite."""
+    """Carga datos procesados de SQLite (máx. MAX_FRAME filas)."""
     path = Path(db_path)
     if not path.exists():
         return pd.DataFrame()
 
     conn = sqlite3.connect(str(path))
     try:
-        df = pd.read_sql_query("SELECT * FROM processed_data", conn)
+        df = pd.read_sql_query(f"SELECT * FROM processed_data LIMIT {MAX_FRAME}", conn)
     except Exception:
         return pd.DataFrame()
     finally:
@@ -157,6 +160,16 @@ if df.empty:
     st.warning("⚠ No hay datos disponibles. Ejecuta primero el pipeline ETL:")
     st.code('python -m etl scrape <url> --selectors "h2.title" ".price"\npython -m etl process', language="bash")
     st.stop()
+
+# Memory limit warning
+try:
+    conn = sqlite3.connect(Path(db_path))
+    actual_total = conn.execute("SELECT COUNT(*) FROM raw_data").fetchone()[0]
+    conn.close()
+    if actual_total > MAX_FRAME:
+        st.info(f"ℹ Mostrando {MAX_FRAME:,} de {actual_total:,} registros. Usa filtros para refinar.")
+except Exception:
+    pass
 
 # --- Filters ---
 st.sidebar.markdown("---")
