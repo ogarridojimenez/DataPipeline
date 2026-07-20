@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import tempfile
+import asyncio
 from pathlib import Path
 
 import sys
@@ -259,6 +260,51 @@ def run_tests():
         print(f"  ✗ cli_help: {e}")
         failed += 1
         errors.append(("cli.help", e))
+
+    # ===== test_concurrency.py =====
+    print("=" * 60)
+    print("test_concurrency.py")
+    print("=" * 60)
+    from etl.scrape import run_scrape, ScrapeResult
+    from etl.config import ScrapeConfig
+
+    class _Tracker:
+        def __init__(self):
+            self.active = 0
+            self.peak = 0
+
+    async def _test_concurrency_limits():
+        tracker = _Tracker()
+        import etl.scrape as _s
+        original_fetch = _s.fetch_url
+
+        async def fake_fetch(client, url, selectors, rate_limiter, config):
+            tracker.active += 1
+            tracker.peak = max(tracker.peak, tracker.active)
+            await asyncio.sleep(0.05)
+            tracker.active -= 1
+            return ScrapeResult(url=url, domain="test", data=[{"test": "1"}], status_code=200)
+
+        _s.fetch_url = fake_fetch
+        config = ScrapeConfig(max_concurrent=3)
+        await run_scrape(
+            [f"http://test{i}.com" for i in range(10)],
+            selectors=[".item"],
+            config=config,
+        )
+        _s.fetch_url = original_fetch
+        return tracker.peak
+
+    try:
+        peak = asyncio.run(_test_concurrency_limits())
+        assert_(peak <= 3, f"Concurrency peak {peak} > 3")
+        assert_(peak >= 2, f"Concurrency peak {peak} < 2 (should have at least some parallelism)")
+        passed += 1
+        print(f"  ✓ concurrency_limited (peak={peak})")
+    except Exception as e:
+        print(f"  ✗ concurrency_limited: {e}")
+        failed += 1
+        errors.append(("concurrency_test", e))
 
     # ===== Summary =====
     print()

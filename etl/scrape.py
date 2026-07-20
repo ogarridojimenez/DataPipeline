@@ -159,14 +159,18 @@ def save_to_sqlite(results: list[ScrapeResult], db_path) -> int:
 
 
 async def run_scrape(urls: list[str], selectors: list[str], config: ScrapeConfig) -> None:
-    """Ejecuta el pipeline de scraping completo."""
+    """Ejecuta el pipeline de scraping completo con concurrencia limitada."""
     rate_limiter = RateLimiter(config.rate_limit_delay)
-    results: list[ScrapeResult] = []
+    semaphore = asyncio.Semaphore(config.max_concurrent)
 
-    transport = httpx.AsyncHTTPTransport(retries=config.max_retries)
-    async with httpx.AsyncClient(transport=transport) as client:
-        tasks = [fetch_url(client, url, selectors, rate_limiter, config) for url in urls]
-        results = await asyncio.gather(*tasks)
+    async def fetch_with_limit(url: str) -> ScrapeResult:
+        async with semaphore:
+            transport = httpx.AsyncHTTPTransport(retries=config.max_retries)
+            async with httpx.AsyncClient(transport=transport) as client:
+                return await fetch_url(client, url, selectors, rate_limiter, config)
+
+    tasks = [fetch_with_limit(url) for url in urls]
+    results = await asyncio.gather(*tasks)
 
     total = save_to_sqlite(results, config.db_path)
 
