@@ -126,8 +126,9 @@ async def fetch_url(
     return ScrapeResult(url=url, domain=domain, data=[], status_code=0, error="Max retries exceeded")
 
 
-def save_to_sqlite(results: list[ScrapeResult], db_path) -> int:
+def save_to_sqlite(results: list[ScrapeResult], db_path, incremental: bool = True) -> int:
     """Guarda resultados en SQLite. Retorna total de filas insertadas."""
+    import hashlib
     from pathlib import Path
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,21 +141,37 @@ def save_to_sqlite(results: list[ScrapeResult], db_path) -> int:
             source_url TEXT,
             source_domain TEXT,
             data TEXT,
+            content_hash TEXT UNIQUE,
             scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
+
+    skipped = 0
     total_rows = 0
     for result in results:
-        if result.data:
-            cursor.execute(
-                "INSERT INTO raw_data (source_url, source_domain, data) VALUES (?, ?, ?)",
-                (result.url, result.domain, json.dumps(result.data)),
-            )
-            total_rows += len(result.data)
+        if not result.data:
+            continue
+        payload = json.dumps(result.data, sort_keys=True)
+        hash_input = f"{result.url}:{payload}".encode()
+        content_hash = hashlib.sha256(hash_input).hexdigest()
+
+        if incremental:
+            cursor.execute("SELECT 1 FROM raw_data WHERE content_hash = ?", (content_hash,))
+            if cursor.fetchone():
+                skipped += len(result.data)
+                continue
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO raw_data (source_url, source_domain, data, content_hash) VALUES (?, ?, ?, ?)",
+            (result.url, result.domain, payload, content_hash),
+        )
+        total_rows += len(result.data)
 
     conn.commit()
     conn.close()
+    if incremental and skipped:
+        print(f"  ↻ Saltados por duplicado: {skipped} filas")
     return total_rows
 
 
@@ -172,7 +189,7 @@ async def run_scrape(urls: list[str], selectors: list[str], config: ScrapeConfig
     tasks = [fetch_with_limit(url) for url in urls]
     results = await asyncio.gather(*tasks)
 
-    total = save_to_sqlite(results, config.db_path)
+    total = save_to_sqlite(results, config.db_path, incremental=config.incremental)
 
     success = sum(1 for r in results if not r.error)
     failed = len(results) - success

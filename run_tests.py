@@ -261,6 +261,41 @@ def run_tests():
         failed += 1
         errors.append(("cli.help", e))
 
+    # ===== test_dedup.py =====
+    print("=" * 60)
+    print("test_dedup.py")
+    print("=" * 60)
+    try:
+        import tempfile as _tf
+        _tdb = str(Path(_tf.mkdtemp()) / "test_dedup.db")
+        _conn = sqlite3.connect(_tdb)
+        _conn.execute("""CREATE TABLE IF NOT EXISTS raw_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT, source_domain TEXT, data TEXT,
+            content_hash TEXT,
+            scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        _conn.commit()
+        _conn.close()
+        from etl.scrape import save_to_sqlite, ScrapeResult
+        r1 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x":"1"},{"x":"2"}], status_code=200)
+        r2 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x":"1"},{"x":"2"}], status_code=200)
+        r3 = ScrapeResult(url="http://b.com", domain="b.com", data=[{"x":"3"},{"x":"4"}], status_code=200)
+        n1 = save_to_sqlite([r1, r2, r3], _tdb, incremental=True)
+        assert_(n1 == 4, f"Expected 4 items (r1=2 skip dup, r3=2), got {n1}")
+        _c1 = sqlite3.connect(_tdb).execute("SELECT COUNT(*) FROM raw_data").fetchone()[0]
+        assert_(_c1 == 2, f"Expected 2 rows (no hash UNIQUE, dedup by SELECT), got {_c1}")
+        n2 = save_to_sqlite([r1], _tdb, incremental=True)
+        assert_(n2 == 0, f"Expected 0 new on repeat, got {n2}")
+        n3 = save_to_sqlite([r1], _tdb, incremental=False)
+        assert_(n3 == 2, f"Expected 2 items with no-incremental, got {n3}")
+        passed += 1
+        print(f"  ✓ incremental_dedup_works")
+    except Exception as e:
+        print(f"  ✗ incremental_dedup_works: {e}")
+        failed += 1
+        errors.append(("dedup_test", e))
+
     # ===== test_concurrency.py =====
     print("=" * 60)
     print("test_concurrency.py")
@@ -286,7 +321,10 @@ def run_tests():
             return ScrapeResult(url=url, domain="test", data=[{"test": "1"}], status_code=200)
 
         _s.fetch_url = fake_fetch
-        config = ScrapeConfig(max_concurrent=3)
+        import tempfile
+        _tmpdir = tempfile.mkdtemp()
+        tmpdb = str(Path(_tmpdir) / "test_concurrency.db")
+        config = ScrapeConfig(max_concurrent=3, db_path=tmpdb)
         await run_scrape(
             [f"http://test{i}.com" for i in range(10)],
             selectors=[".item"],

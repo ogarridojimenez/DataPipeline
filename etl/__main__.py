@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--timeout", type=int, default=30, help="Timeout por request (s)")
     sp.add_argument("--rate-limit", type=float, default=1.0, help="Delay entre requests (s)")
     sp.add_argument("--concurrency", type=int, default=10, help="Máximo requests simultáneos")
+    sp.add_argument("--incremental/--no-incremental", dest="incremental", default=True, action=argparse.BooleanOptionalAction, help="Evitar duplicados por hash")
     sp.add_argument("--db", type=str, default="data/pipeline.db", help="Ruta SQLite")
 
     # --- process ---
@@ -67,6 +68,7 @@ def main() -> None:
             rate_limit_delay=args.rate_limit,
             db_path=Path(args.db),
             max_concurrent=args.concurrency,
+            incremental=args.incremental,
         )
         asyncio.run(run_scrape(args.urls, args.selectors, config))
 

@@ -25,6 +25,7 @@ class ScrapeConfig:
     db_path: Path = field(default_factory=lambda: Path("data/pipeline.db"))
     user_agents: list[str] = field(default_factory=lambda: USER_AGENTS.copy())
     max_concurrent: int = 10  # máximo de requests simultáneos
+    incremental: bool = True  # evitar duplicados
 
 
 @dataclass
