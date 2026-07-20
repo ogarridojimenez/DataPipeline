@@ -1,0 +1,15 @@
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = ["E", "W", "F", "I", "UP", "N", "D410", "D411", "D412"]
+ignore = ["E501", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107", "D200", "D210", "D212", "D213", "D400", "D401", "D402", "D403", "D404", "D405", "D406", "D407", "D408", "D409", "D413", "D414", "D415", "D416", "D417", "N801", "N802", "N803", "N806", "N815", "N816", "N999"]
+unfixable = ["T20"]
+
+[lint.per-file-ignores]
+"tests/*" = ["D", "N"]
+"test_*" = ["D", "N"]
+"run_tests.py" = ["F823"]
+
+[format]
+quote-style = "double"

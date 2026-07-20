@@ -1,35 +1,44 @@
 """Dashboard ASGI — Starlette + Jinja2 + Chart.js."""
 
+from __future__ import annotations
+
 import csv
 import io
 import json
 from pathlib import Path
+from typing import Any
 
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse, HTMLResponse, StreamingResponse
-from starlette.routing import Route, Mount
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
+from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from dashboard.queries import (
-    get_stats, get_top_items, get_time_series,
-    get_domain_breakdown, get_records, get_column_names,
+    get_column_names,
+    get_domain_breakdown,
+    get_records,
+    get_stats,
+    get_time_series,
+    get_top_items,
 )
 
-DB_PATH = Path(__file__).parent.parent / "data" / "pipeline.db"
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-STATIC_DIR = Path(__file__).parent / "static"
+DB_PATH: Path = Path(__file__).parent.parent / "data" / "pipeline.db"
+TEMPLATES_DIR: Path = Path(__file__).parent / "templates"
+STATIC_DIR: Path = Path(__file__).parent / "static"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-def get_db():
+def get_db() -> Path:
     return DB_PATH
 
 
 # --- Páginas HTML ---
 
-async def homepage(request):
+
+async def homepage(request: Request) -> HTMLResponse:
     db = get_db()
     if not db.exists():
         return HTMLResponse("<h1>No data yet. Run the ETL pipeline first.</h1>", status_code=404)
@@ -40,25 +49,30 @@ async def homepage(request):
     domains = get_domain_breakdown(db)
     columns = get_column_names(db)
 
-    return templates.TemplateResponse(request, "index.html", {
-        "stats": stats,
-        "top_items": top,
-        "timeseries": timeseries,
-        "domains": domains,
-        "columns": columns,
-    })
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "stats": stats,
+            "top_items": top,
+            "timeseries": timeseries,
+            "domains": domains,
+            "columns": columns,
+        },
+    )
 
 
 # --- API JSON ---
 
-async def api_stats(request):
+
+async def api_stats(request: Request) -> JSONResponse:
     db = get_db()
     if not db.exists():
         return JSONResponse({"error": "No data"}, status_code=404)
     return JSONResponse(get_stats(db))
 
 
-async def api_top(request):
+async def api_top(request: Request) -> JSONResponse:
     db = get_db()
     if not db.exists():
         return JSONResponse({"error": "No data"}, status_code=404)
@@ -67,21 +81,21 @@ async def api_top(request):
     return JSONResponse(get_top_items(db, n, col))
 
 
-async def api_timeseries(request):
+async def api_timeseries(request: Request) -> JSONResponse:
     db = get_db()
     if not db.exists():
         return JSONResponse({"error": "No data"}, status_code=404)
     return JSONResponse(get_time_series(db))
 
 
-async def api_domains(request):
+async def api_domains(request: Request) -> JSONResponse:
     db = get_db()
     if not db.exists():
         return JSONResponse({"error": "No data"}, status_code=404)
     return JSONResponse(get_domain_breakdown(db))
 
 
-async def api_records(request):
+async def api_records(request: Request) -> JSONResponse:
     db = get_db()
     if not db.exists():
         return JSONResponse({"error": "No data"}, status_code=404)
@@ -91,14 +105,14 @@ async def api_records(request):
     return JSONResponse(get_records(db, domain, limit, offset))
 
 
-async def api_export(request):
+async def api_export(request: Request) -> JSONResponse | StreamingResponse:
     db = get_db()
     if not db.exists():
         return JSONResponse({"error": "No data"}, status_code=404)
 
     fmt = request.query_params.get("format", "csv")
     domain = request.query_params.get("domain")
-    records = get_records(db, domain, limit=10000)
+    records: list[dict[str, Any]] = get_records(db, domain, limit=10000)
 
     if fmt == "json":
         data = [json.loads(r["data"]) for r in records]
@@ -106,8 +120,11 @@ async def api_export(request):
 
     # CSV
     if not records:
-        return StreamingResponse(io.BytesIO(b""), media_type="text/csv",
-                                headers={"Content-Disposition": "attachment; filename=export.csv"})
+        return StreamingResponse(
+            io.BytesIO(b""),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=export.csv"},
+        )
 
     first = json.loads(records[0]["data"])
     if isinstance(first, dict):
@@ -133,7 +150,7 @@ async def api_export(request):
 
 # --- App ---
 
-routes = [
+routes: list[Mount | Route] = [
     Route("/", homepage),
     Route("/api/stats", api_stats),
     Route("/api/top", api_top),
@@ -144,8 +161,9 @@ routes = [
     Mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
 
-app = Starlette(debug=True, routes=routes)
+app: Starlette = Starlette(debug=True, routes=routes)
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("dashboard.app:app", host="0.0.0.0", port=8501, reload=True)

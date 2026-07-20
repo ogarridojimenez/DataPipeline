@@ -1,10 +1,14 @@
 """Queries SQLite para el dashboard."""
 
+from __future__ import annotations
+
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 
-def get_stats(db_path) -> dict:
+def get_stats(db_path: Path) -> dict[str, Any]:
     """Estadísticas generales."""
     conn = sqlite3.connect(str(db_path))
     c = conn.cursor()
@@ -30,13 +34,12 @@ def get_stats(db_path) -> dict:
     }
 
 
-def get_top_items(db_path, n: int = 10, column: str = "title") -> list[dict]:
+def get_top_items(db_path: Path, n: int = 10, column: str = "title") -> list[dict[str, Any]]:
     """Top N items por frecuencia en una columna."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    # Buscar la columna en processed_data (los datos están en JSON)
     query = f"""
         SELECT json_extract(data, '$.{column}') as val, COUNT(*) as cnt
         FROM processed_data
@@ -56,7 +59,7 @@ def get_top_items(db_path, n: int = 10, column: str = "title") -> list[dict]:
     return rows
 
 
-def get_time_series(db_path) -> list[dict]:
+def get_time_series(db_path: Path) -> list[dict[str, Any]]:
     """Registros por día."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -73,7 +76,7 @@ def get_time_series(db_path) -> list[dict]:
     return rows
 
 
-def get_domain_breakdown(db_path) -> list[dict]:
+def get_domain_breakdown(db_path: Path) -> list[dict[str, Any]]:
     """Registros por dominio."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -90,32 +93,38 @@ def get_domain_breakdown(db_path) -> list[dict]:
     return rows
 
 
-def get_records(db_path, domain: str = None, limit: int = 50, offset: int = 0) -> list[dict]:
+def get_records(db_path: Path, domain: str | None = None, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     """Registros paginados, opcionalmente filtrados por dominio."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
     if domain:
-        c.execute("""
+        c.execute(
+            """
             SELECT id, source_url, source_domain, data, scraped_at
             FROM processed_data
             WHERE source_domain = ?
             ORDER BY id DESC LIMIT ? OFFSET ?
-        """, (domain, limit, offset))
+        """,
+            (domain, limit, offset),
+        )
     else:
-        c.execute("""
+        c.execute(
+            """
             SELECT id, source_url, source_domain, data, scraped_at
             FROM processed_data
             ORDER BY id DESC LIMIT ? OFFSET ?
-        """, (limit, offset))
+        """,
+            (limit, offset),
+        )
 
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return rows
 
 
-def get_column_names(db_path) -> list[str]:
+def get_column_names(db_path: Path) -> list[str]:
     """Obtiene las columnas disponibles en los datos JSON."""
     conn = sqlite3.connect(str(db_path))
     c = conn.cursor()
@@ -127,7 +136,6 @@ def get_column_names(db_path) -> list[str]:
     if not row:
         return []
 
-    import json
     data = json.loads(row[0])
     if isinstance(data, dict):
         return list(data.keys())

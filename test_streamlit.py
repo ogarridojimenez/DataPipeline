@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 
@@ -9,7 +10,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 
@@ -67,41 +67,59 @@ def run_tests():
         from dashboard.streamlit_app import load_data, load_processed_data
 
         load_tests = [
-            ("load_data_returns_df", lambda: (
-                (df := load_data(str(db_path))),
-                assert_(isinstance(df, pd.DataFrame)),
-                assert_(len(df) == 5, f"Expected 5, got {len(df)}"),
-            )),
-            ("load_data_has_columns", lambda: (
-                (df := load_data(str(db_path))),
-                assert_("title" in df.columns),
-                assert_("_source_url" in df.columns),
-                assert_("_source_domain" in df.columns),
-            )),
-            ("load_data_metadata", lambda: (
-                (df := load_data(str(db_path))),
-                assert_(df["_source_url"].iloc[0] == "http://test0.com/products"),
-                assert_(df["_source_domain"].iloc[0] == "test0.com"),
-            )),
-            ("load_data_empty_db", lambda: (
-                (empty_db := Path(tmpdir) / "empty.db"),
-                (conn := sqlite3.connect(str(empty_db))),
-                conn.execute("""CREATE TABLE raw_data (
+            (
+                "load_data_returns_df",
+                lambda: (
+                    (df := load_data(str(db_path))),
+                    assert_(isinstance(df, pd.DataFrame)),
+                    assert_(len(df) == 5, f"Expected 5, got {len(df)}"),
+                ),
+            ),
+            (
+                "load_data_has_columns",
+                lambda: (
+                    (df := load_data(str(db_path))),
+                    assert_("title" in df.columns),
+                    assert_("_source_url" in df.columns),
+                    assert_("_source_domain" in df.columns),
+                ),
+            ),
+            (
+                "load_data_metadata",
+                lambda: (
+                    (df := load_data(str(db_path))),
+                    assert_(df["_source_url"].iloc[0] == "http://test0.com/products"),
+                    assert_(df["_source_domain"].iloc[0] == "test0.com"),
+                ),
+            ),
+            (
+                "load_data_empty_db",
+                lambda: (
+                    (empty_db := Path(tmpdir) / "empty.db"),
+                    (conn := sqlite3.connect(str(empty_db))),
+                    conn.execute("""CREATE TABLE raw_data (
                     id INTEGER PRIMARY KEY, source_url TEXT,
                     source_domain TEXT, data TEXT, scraped_at TIMESTAMP
                 )"""),
-                conn.close(),
-                (df := load_data(str(empty_db))),
-                assert_(df.empty),
-            )),
-            ("load_data_missing_db", lambda: (
-                (df := load_data(str(Path(tmpdir) / "nonexistent.db"))),
-                assert_(df.empty),
-            )),
-            ("load_processed_data_empty", lambda: (
-                (df := load_processed_data(str(db_path))),
-                assert_(df.empty),  # No processed_data table yet
-            )),
+                    conn.close(),
+                    (df := load_data(str(empty_db))),
+                    assert_(df.empty),
+                ),
+            ),
+            (
+                "load_data_missing_db",
+                lambda: (
+                    (df := load_data(str(Path(tmpdir) / "nonexistent.db"))),
+                    assert_(df.empty),
+                ),
+            ),
+            (
+                "load_processed_data_empty",
+                lambda: (
+                    (df := load_processed_data(str(db_path))),
+                    assert_(df.empty),  # No processed_data table yet
+                ),
+            ),
         ]
 
         for name, test_fn in load_tests:
@@ -120,13 +138,15 @@ def run_tests():
     print("test_streamlit_charts.py")
     print("=" * 60)
 
-    df_sample = pd.DataFrame({
-        "title": ["Laptop", "Mouse", "Keyboard", "Monitor", "USB Cable"],
-        "price": ["$1299", "$45", "$89", "$299", "$12"],
-        "category": ["electronics", "electronics", "electronics", "electronics", "accessories"],
-        "_source_url": ["http://a.com", "http://a.com", "http://b.com", "http://b.com", "http://c.com"],
-        "_source_domain": ["a.com", "a.com", "b.com", "b.com", "c.com"],
-    })
+    df_sample = pd.DataFrame(
+        {
+            "title": ["Laptop", "Mouse", "Keyboard", "Monitor", "USB Cable"],
+            "price": ["$1299", "$45", "$89", "$299", "$12"],
+            "category": ["electronics", "electronics", "electronics", "electronics", "accessories"],
+            "_source_url": ["http://a.com", "http://a.com", "http://b.com", "http://b.com", "http://c.com"],
+            "_source_domain": ["a.com", "a.com", "b.com", "b.com", "c.com"],
+        }
+    )
 
     def _test_bar_chart(df):
         counts = df["title"].value_counts().head(10).reset_index()
@@ -144,10 +164,13 @@ def run_tests():
     chart_tests = [
         ("bar_chart", lambda: _test_bar_chart(df_sample)),
         ("donut_chart", lambda: _test_donut_chart(df_sample)),
-        ("histogram", lambda: (
-            (fig := px.histogram(df_sample, x="title")),
-            assert_(isinstance(fig, go.Figure)),
-        )),
+        (
+            "histogram",
+            lambda: (
+                (fig := px.histogram(df_sample, x="title")),
+                assert_(isinstance(fig, go.Figure)),
+            ),
+        ),
     ]
 
     for name, test_fn in chart_tests:
@@ -171,7 +194,8 @@ def run_tests():
     # Test --help shows streamlit mode
     result = subprocess.run(
         [sys.executable, "-m", "etl", "dashboard", "--help"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         cwd=str(Path(__file__).resolve().parent),
     )
     try:
@@ -188,7 +212,8 @@ def run_tests():
     # Test main --help
     result = subprocess.run(
         [sys.executable, "-m", "etl", "--help"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         cwd=str(Path(__file__).resolve().parent),
     )
     try:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
-from urllib.request import Request, urlopen
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger("etl.notify")
 

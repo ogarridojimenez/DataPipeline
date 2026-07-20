@@ -1,8 +1,8 @@
 """Tests para etl.scrape — unit tests con HTML mock."""
 
 import pytest
-from etl.scrape import extract_data, RateLimiter
 
+from etl.scrape import RateLimiter, extract_data
 
 SAMPLE_HTML = """
 <html>
@@ -71,6 +71,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_first_request_no_wait(self):
         import asyncio
+
         rl = RateLimiter(delay=1.0)
         start = asyncio.get_event_loop().time()
         await rl.wait("example.com")
@@ -80,6 +81,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_rate_limit_enforced(self):
         import asyncio
+
         rl = RateLimiter(delay=0.2)
         await rl.wait("example.com")
         start = asyncio.get_event_loop().time()
@@ -90,6 +92,7 @@ class TestRateLimiter:
     @pytest.mark.asyncio
     async def test_different_domains_independent(self):
         import asyncio
+
         rl = RateLimiter(delay=0.5)
         await rl.wait("a.com")
         start = asyncio.get_event_loop().time()

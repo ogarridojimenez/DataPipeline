@@ -3,27 +3,26 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
-from pathlib import Path
 
 import pandas as pd
 
 from etl.config import ProcessConfig
 
+logger = logging.getLogger("etl.process")
 
-def load_raw_data(db_path) -> pd.DataFrame:
-    """Carga datos raw de SQLite y expande JSON anidado."""
-    conn = sqlite3.connect(str(db_path))
-    df = pd.read_sql_query("SELECT * FROM raw_data", conn)
-    conn.close()
 
-    if df.empty:
+def expand_json_records(df: pd.DataFrame, data_col: str = "data") -> pd.DataFrame:
+    """Expande una columna JSON (que contiene dicts o listas de dicts) en filas."""
+    if df.empty or data_col not in df.columns:
         return df
-
-    # Expandir JSON anidado
     records = []
     for _, row in df.iterrows():
-        items = json.loads(row["data"])
+        try:
+            items = json.loads(row[data_col])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
         if isinstance(items, list):
             for item in items:
                 if isinstance(item, dict):
@@ -36,8 +35,15 @@ def load_raw_data(db_path) -> pd.DataFrame:
             items["_source_domain"] = row.get("source_domain", "")
             items["_scraped_at"] = row.get("scraped_at", "")
             records.append(items)
-
     return pd.DataFrame(records)
+
+
+def load_raw_data(db_path) -> pd.DataFrame:
+    """Carga datos raw de SQLite y expande JSON anidado."""
+    conn = sqlite3.connect(str(db_path))
+    df = pd.read_sql_query("SELECT * FROM raw_data", conn)
+    conn.close()
+    return expand_json_records(df)
 
 
 def clean_data(df: pd.DataFrame, config: ProcessConfig) -> pd.DataFrame:
@@ -51,7 +57,7 @@ def clean_data(df: pd.DataFrame, config: ProcessConfig) -> pd.DataFrame:
     df = df.drop_duplicates()
     dups_removed = initial - len(df)
     if dups_removed:
-        print(f"  ✓ Duplicados eliminados: {dups_removed}")
+        logger.info("  ✓ Duplicados eliminados: %s", dups_removed)
 
     # 2. Normalizar strings (strip whitespace)
     str_cols = df.select_dtypes(include=["object"]).columns
@@ -66,7 +72,7 @@ def clean_data(df: pd.DataFrame, config: ProcessConfig) -> pd.DataFrame:
         df = df[~(df[non_meta].eq("").all(axis=1))]
         nulls_removed = before - len(df)
         if nulls_removed:
-            print(f"  ✓ Filas vacías eliminadas: {nulls_removed}")
+            logger.info("  ✓ Filas vacías eliminadas: %s", nulls_removed)
     elif config.fill_null_strategy == "fill":
         df[non_meta] = df[non_meta].fillna("")
     elif config.fill_null_strategy == "mean":
@@ -87,9 +93,9 @@ def clean_data(df: pd.DataFrame, config: ProcessConfig) -> pd.DataFrame:
                 outliers = (df[col] - mean).abs() > (config.outlier_std_threshold * std)
                 n_outliers = outliers.sum()
                 if n_outliers:
-                    print(f"  ⚠ Outliers en '{col}': {n_outliers} (> {config.outlier_std_threshold}σ)")
+                    logger.warning("  ⚠ Outliers en '%s': %s (> %sσ)", col, n_outliers, config.outlier_std_threshold)
 
-    print(f"  ✓ Limpieza: {initial} → {len(df)} registros")
+    logger.info("  ✓ Limpieza: %s → %s registros", initial, len(df))
     return df
 
 
@@ -121,10 +127,7 @@ def compute_summary(df: pd.DataFrame) -> dict:
         }
 
     if cat_cols:
-        summary["categorical_top"] = {
-            col: df[col].value_counts().head(3).to_dict()
-            for col in cat_cols
-        }
+        summary["categorical_top"] = {col: df[col].value_counts().head(3).to_dict() for col in cat_cols}
 
     # Dominio stats
     if "_source_domain" in df.columns:
@@ -252,11 +255,11 @@ def save_processed(df: pd.DataFrame, db_path) -> None:
 def run_process(db_path, config: ProcessConfig, verbose: bool = True) -> None:
     """Ejecuta el pipeline de procesamiento completo."""
     if verbose:
-        print(f"⚙ Procesando datos de {db_path}...")
+        logger.info("⚙ Procesando datos de %s...", db_path)
     df = load_raw_data(db_path)
 
     if df.empty:
-        print("⚠ No hay datos para procesar")
+        logger.warning("No hay datos para procesar")
         return
 
     cleaned = clean_data(df, config)
@@ -264,20 +267,20 @@ def run_process(db_path, config: ProcessConfig, verbose: bool = True) -> None:
     # Resumen avanzado
     summary = compute_summary(cleaned)
     if verbose and summary:
-        print(f"  📊 Registros: {summary['total_records']}")
-        print(f"  🔢 Columnas numéricas: {summary.get('numeric_columns', 0)}")
-        print(f"  📝 Columnas categóricas: {summary.get('categorical_columns', 0)}")
+        logger.info("  📊 Registros: %s", summary["total_records"])
+        logger.info("  🔢 Columnas numéricas: %s", summary.get("numeric_columns", 0))
+        logger.info("  📝 Columnas categóricas: %s", summary.get("categorical_columns", 0))
         if "top_domains" in summary:
-            print(f"  🌐 Top dominios: {', '.join(summary['top_domains'].keys())}")
+            logger.info("  🌐 Top dominios: %s", ", ".join(summary["top_domains"].keys()))
         if summary.get("numeric_stats"):
             for col, stats in summary["numeric_stats"].items():
-                print(f"  📈 {col}: media={stats['mean']}, min={stats['min']}, max={stats['max']}")
+                logger.info("  📈 %s: media=%s, min=%s, max=%s", col, stats["mean"], stats["min"], stats["max"])
 
     # Group by dominio
     gb = group_by_domain(cleaned)
     if verbose and not gb.empty:
-        print(f"  🔗 Agrupación por dominio: {len(gb)} grupos")
+        logger.info("  🔗 Agrupación por dominio: %s grupos", len(gb))
 
     save_processed(cleaned, db_path)
     if verbose:
-        print(f"✓ Procesamiento completo: {len(cleaned)} registros limpios")
+        logger.info("✓ Procesamiento completo: %s registros limpios", len(cleaned))

@@ -19,6 +19,7 @@ USER_AGENTS: list[str] = [
 @dataclass
 class ScrapeConfig:
     """Configuración para la fase de scraping."""
+
     timeout: int = 30
     max_retries: int = 3
     rate_limit_delay: float = 1.0  # segundos entre requests por dominio
@@ -32,6 +33,7 @@ class ScrapeConfig:
 @dataclass
 class ProcessConfig:
     """Configuración para la fase de procesamiento."""
+
     outlier_std_threshold: float = 3.0
     fill_null_strategy: str = "drop"  # drop | fill | mean | median
     output_dir: Path = field(default_factory=lambda: Path("data/processed"))

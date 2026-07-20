@@ -1,12 +1,12 @@
 """Tests para ETL core (selectolax + pandas)."""
 
+import asyncio
 import json
 import sqlite3
+import sys
 import tempfile
-import asyncio
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 
@@ -16,7 +16,6 @@ def assert_(condition, msg="Assertion failed"):
 
 
 def run_tests():
-    import json
     passed = 0
     failed = 0
     errors = []
@@ -26,7 +25,7 @@ def run_tests():
     print("test_scrape.py")
     print("=" * 60)
 
-    from etl.scrape import extract_data, RateLimiter
+    from etl.scrape import extract_data
 
     SAMPLE_HTML = """
     <html><body>
@@ -50,37 +49,58 @@ def run_tests():
     """
 
     scrape_tests = [
-        ("extract_single_selector", lambda: (
-            (r := extract_data(SAMPLE_HTML, ["h2.title"], "http://test.com", "test.com")),
-            assert_(len(r) == 3, f"Expected 3, got {len(r)}"),
-            assert_(r[0]["title"] == "Laptop Pro", f"Got {r[0]['title']}"),
-        )),
-        ("extract_multiple_selectors", lambda: (
-            (r := extract_data(SAMPLE_HTML, ["h2.title", ".price", ".stock"], "http://test.com", "test.com")),
-            assert_(len(r) == 3, f"Expected 3, got {len(r)}"),
-            assert_(r[0]["price"] == "$1299", f"Got price: {r[0].get('price')}"),
-            assert_(r[0]["stock"] == "In Stock", f"Got stock: {r[0].get('stock')}"),
-        )),
-        ("source_metadata", lambda: (
-            (r := extract_data(SAMPLE_HTML, ["h2.title"], "http://test.com/products", "test.com")),
-            assert_(r[0]["_source_url"] == "http://test.com/products"),
-            assert_(r[0]["_source_domain"] == "test.com"),
-        )),
-        ("empty_html", lambda: (
-            (r := extract_data("<html><body></body></html>", ["h2.title"], "http://test.com", "test.com")),
-            assert_(r == [], f"Expected [], got {r}"),
-        )),
-        ("selector_no_match", lambda: (
-            (r := extract_data(SAMPLE_HTML, [".nonexistent"], "http://test.com", "test.com")),
-            assert_(r == [], f"Expected [], got {r}"),
-        )),
-        ("mismatched_counts", lambda: (
-            (html := '<html><body><h2 class="title">A</h2><h2 class="title">B</h2><span class="price">$10</span></body></html>'),
-            (r := extract_data(html, ["h2.title", ".price"], "http://t.com", "t.com")),
-            assert_(len(r) == 2, f"Expected 2, got {len(r)}"),
-            assert_(r[0]["price"] == "$10"),
-            assert_(r[1]["price"] == ""),
-        )),
+        (
+            "extract_single_selector",
+            lambda: (
+                (r := extract_data(SAMPLE_HTML, ["h2.title"], "http://test.com", "test.com")),
+                assert_(len(r) == 3, f"Expected 3, got {len(r)}"),
+                assert_(r[0]["title"] == "Laptop Pro", f"Got {r[0]['title']}"),
+            ),
+        ),
+        (
+            "extract_multiple_selectors",
+            lambda: (
+                (r := extract_data(SAMPLE_HTML, ["h2.title", ".price", ".stock"], "http://test.com", "test.com")),
+                assert_(len(r) == 3, f"Expected 3, got {len(r)}"),
+                assert_(r[0]["price"] == "$1299", f"Got price: {r[0].get('price')}"),
+                assert_(r[0]["stock"] == "In Stock", f"Got stock: {r[0].get('stock')}"),
+            ),
+        ),
+        (
+            "source_metadata",
+            lambda: (
+                (r := extract_data(SAMPLE_HTML, ["h2.title"], "http://test.com/products", "test.com")),
+                assert_(r[0]["_source_url"] == "http://test.com/products"),
+                assert_(r[0]["_source_domain"] == "test.com"),
+            ),
+        ),
+        (
+            "empty_html",
+            lambda: (
+                (r := extract_data("<html><body></body></html>", ["h2.title"], "http://test.com", "test.com")),
+                assert_(r == [], f"Expected [], got {r}"),
+            ),
+        ),
+        (
+            "selector_no_match",
+            lambda: (
+                (r := extract_data(SAMPLE_HTML, [".nonexistent"], "http://test.com", "test.com")),
+                assert_(r == [], f"Expected [], got {r}"),
+            ),
+        ),
+        (
+            "mismatched_counts",
+            lambda: (
+                (
+                    html
+                    := '<html><body><h2 class="title">A</h2><h2 class="title">B</h2><span class="price">$10</span></body></html>'
+                ),
+                (r := extract_data(html, ["h2.title", ".price"], "http://t.com", "t.com")),
+                assert_(len(r) == 2, f"Expected 2, got {len(r)}"),
+                assert_(r[0]["price"] == "$10"),
+                assert_(r[1]["price"] == ""),
+            ),
+        ),
     ]
 
     for name, test_fn in scrape_tests:
@@ -100,11 +120,13 @@ def run_tests():
     print("=" * 60)
 
     import pandas as pd
-    from etl.process import load_raw_data, clean_data, save_processed
+
     from etl.config import ProcessConfig
+    from etl.process import clean_data, load_raw_data, save_processed
 
     def make_test_db(tmpdir):
         import json
+
         db_path = Path(tmpdir) / "test.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute("""CREATE TABLE raw_data (
@@ -116,8 +138,10 @@ def run_tests():
             [{"title": "C", "price": "50"}],
         ]
         for items in data_items:
-            conn.execute("INSERT INTO raw_data (source_url, source_domain, data) VALUES (?, ?, ?)",
-                        ("http://test.com", "test.com", json.dumps(items)))
+            conn.execute(
+                "INSERT INTO raw_data (source_url, source_domain, data) VALUES (?, ?, ?)",
+                ("http://test.com", "test.com", json.dumps(items)),
+            )
         conn.commit()
         conn.close()
         return db_path
@@ -138,16 +162,22 @@ def run_tests():
         db = make_test_db(tmpdir)
 
         process_tests = [
-            ("loads_and_expands_json", lambda: (
-                (df := load_raw_data(db)),
-                assert_(len(df) == 4, f"Expected 4, got {len(df)}"),
-                assert_("title" in df.columns),
-            )),
-            ("removes_duplicates", lambda: (
-                (df := load_raw_data(db)),
-                (cleaned := clean_data(df, ProcessConfig(fill_null_strategy="drop"))),
-                assert_(len(cleaned) == 3, f"Expected 3, got {len(cleaned)}"),
-            )),
+            (
+                "loads_and_expands_json",
+                lambda: (
+                    (df := load_raw_data(db)),
+                    assert_(len(df) == 4, f"Expected 4, got {len(df)}"),
+                    assert_("title" in df.columns),
+                ),
+            ),
+            (
+                "removes_duplicates",
+                lambda: (
+                    (df := load_raw_data(db)),
+                    (cleaned := clean_data(df, ProcessConfig(fill_null_strategy="drop"))),
+                    assert_(len(cleaned) == 3, f"Expected 3, got {len(cleaned)}"),
+                ),
+            ),
             ("fill_nulls_strategy", lambda: _test_fill_nulls(db)),
             ("drop_nulls_strategy", lambda: _test_drop_nulls(db)),
             ("is_dataframe", lambda: assert_(isinstance(load_raw_data(db), pd.DataFrame))),
@@ -173,7 +203,7 @@ def run_tests():
             rows = cursor.fetchall()
             conn.close()
             assert_(len(rows) == 4, f"Expected 4, got {len(rows)}")
-            print(f"  ✓ save_to_sqlite")
+            print("  ✓ save_to_sqlite")
             passed += 1
         except Exception as e:
             print(f"  ✗ save_to_sqlite: {e}")
@@ -204,8 +234,10 @@ def run_tests():
             {"product": "Book", "price": "15", "category": "books"},
             {"product": "", "price": "30", "category": "misc"},
         ]
-        conn.execute("INSERT INTO raw_data (source_url, source_domain, data) VALUES (?, ?, ?)",
-                     ("http://test.com/products", "test.com", json.dumps(items)))
+        conn.execute(
+            "INSERT INTO raw_data (source_url, source_domain, data) VALUES (?, ?, ?)",
+            ("http://test.com/products", "test.com", json.dumps(items)),
+        )
         conn.commit()
         conn.close()
 
@@ -220,14 +252,20 @@ def run_tests():
         integration_tests = [
             ("csv_exists", lambda: assert_((output_dir / "datapipeline_export.csv").exists())),
             ("json_exists", lambda: assert_((output_dir / "datapipeline_export.json").exists())),
-            ("csv_row_count", lambda: (
-                (lines := (output_dir / "datapipeline_export.csv").read_text().strip().split("\n")),
-                assert_(len(lines) >= 3, f"Expected >=3 lines, got {len(lines)}"),
-            )),
-            ("json_row_count", lambda: (
-                (data := json.loads((output_dir / "datapipeline_export.json").read_text())),
-                assert_(len(data) >= 2, f"Expected >=2, got {len(data)}"),
-            )),
+            (
+                "csv_row_count",
+                lambda: (
+                    (lines := (output_dir / "datapipeline_export.csv").read_text().strip().split("\n")),
+                    assert_(len(lines) >= 3, f"Expected >=3 lines, got {len(lines)}"),
+                ),
+            ),
+            (
+                "json_row_count",
+                lambda: (
+                    (data := json.loads((output_dir / "datapipeline_export.json").read_text())),
+                    assert_(len(data) >= 2, f"Expected >=2, got {len(data)}"),
+                ),
+            ),
         ]
 
         for name, test_fn in integration_tests:
@@ -247,12 +285,12 @@ def run_tests():
             assert_(parquet_path.exists(), f"Parquet file not found: {parquet_path}")
             df_parquet = pd.read_parquet(parquet_path)
             assert_(len(df_parquet) >= 2, f"Expected >=2 rows in parquet, got {len(df_parquet)}")
-            print(f"  ✓ parquet_export")
+            print("  ✓ parquet_export")
             passed += 1
         except Exception as e:
             print(f"  ✗ parquet_export: {e}")
             failed += 1
-            errors.append((f"integration.parquet_export", e))
+            errors.append(("integration.parquet_export", e))
 
     # ===== CLI test =====
     print()
@@ -261,9 +299,12 @@ def run_tests():
     print("=" * 60)
 
     import subprocess
+
     result = subprocess.run(
         [sys.executable, "-m", "etl", "--help"],
-        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent)
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parent),
     )
     try:
         assert_(result.returncode == 0, f"Exit code: {result.returncode}")
@@ -283,6 +324,7 @@ def run_tests():
     print("=" * 60)
     try:
         import tempfile as _tf
+
         _tdb = str(Path(_tf.mkdtemp()) / "test_dedup.db")
         _conn = sqlite3.connect(_tdb)
         _conn.execute("""CREATE TABLE IF NOT EXISTS raw_data (
@@ -293,10 +335,11 @@ def run_tests():
         )""")
         _conn.commit()
         _conn.close()
-        from etl.scrape import save_to_sqlite, ScrapeResult
-        r1 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x":"1"},{"x":"2"}], status_code=200)
-        r2 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x":"1"},{"x":"2"}], status_code=200)
-        r3 = ScrapeResult(url="http://b.com", domain="b.com", data=[{"x":"3"},{"x":"4"}], status_code=200)
+        from etl.scrape import ScrapeResult, save_to_sqlite
+
+        r1 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x": "1"}, {"x": "2"}], status_code=200)
+        r2 = ScrapeResult(url="http://a.com", domain="a.com", data=[{"x": "1"}, {"x": "2"}], status_code=200)
+        r3 = ScrapeResult(url="http://b.com", domain="b.com", data=[{"x": "3"}, {"x": "4"}], status_code=200)
         n1, _ = save_to_sqlite([r1, r2, r3], _tdb, incremental=True)
         assert_(n1 == 4, f"Expected 4 items (r1=2 skip dup, r3=2), got {n1}")
         _c1 = sqlite3.connect(_tdb).execute("SELECT COUNT(*) FROM raw_data").fetchone()[0]
@@ -306,7 +349,7 @@ def run_tests():
         n3, _ = save_to_sqlite([r1], _tdb, incremental=False)
         assert_(n3 == 2, f"Expected 2 items with no-incremental, got {n3}")
         passed += 1
-        print(f"  ✓ incremental_dedup_works")
+        print("  ✓ incremental_dedup_works")
     except Exception as e:
         print(f"  ✗ incremental_dedup_works: {e}")
         failed += 1
@@ -318,9 +361,10 @@ def run_tests():
     print("=" * 60)
     try:
         import http.server
-        import threading
         import json
-        from etl.notify import send_webhook, notify_scrape_complete
+        import threading
+
+        from etl.notify import send_webhook
 
         _received: list[dict] = []
 
@@ -346,7 +390,7 @@ def run_tests():
         assert_(len(_received) == 1, f"Expected 1 request, got {len(_received)}")
         assert_(_received[0]["text"] == "test msg", f"Wrong text: {_received[0]}")
         passed += 1
-        print(f"  ✓ webhook_send")
+        print("  ✓ webhook_send")
     except Exception as e:
         print(f"  ✗ webhook_send: {e}")
         failed += 1
@@ -358,31 +402,35 @@ def run_tests():
     print("=" * 60)
     try:
         import pandas as _pd
+
         from etl.process import compute_summary, group_by_domain, pipeline_pipe
-        _df = _pd.DataFrame({
-            "_source_domain": ["a.com","a.com","b.com","b.com"],
-            "value": [10, 20, 30, 40],
-            "category": ["x","y","x","y"],
-        })
+
+        _df = _pd.DataFrame(
+            {
+                "_source_domain": ["a.com", "a.com", "b.com", "b.com"],
+                "value": [10, 20, 30, 40],
+                "category": ["x", "y", "x", "y"],
+            }
+        )
         _s = compute_summary(_df)
         assert_(_s["total_records"] == 4, f"summary count: {_s}")
         assert_(_s["numeric_columns"] == 1, f"numeric cols: {_s}")
         assert_("a.com" in _s["top_domains"], f"top_domains: {_s}")
         passed += 1
-        print(f"  ✓ compute_summary")
+        print("  ✓ compute_summary")
         _gb = group_by_domain(_df)
         assert_(len(_gb) == 2, f"group_by should have 2 domains, got {len(_gb)}")
         assert_("value_mean" in _gb.columns, f"column value_mean missing: {_gb.columns.tolist()}")
         passed += 1
-        print(f"  ✓ group_by_domain")
+        print("  ✓ group_by_domain")
         _filtered = pipeline_pipe(_df, [{"type": "filter", "params": {"column": "value", "op": "gt", "value": 20}}])
         assert_(len(_filtered) == 2, f"filter >20 expected 2, got {len(_filtered)}")
         passed += 1
-        print(f"  ✓ pipeline_pipe_filter")
+        print("  ✓ pipeline_pipe_filter")
         _ranked = pipeline_pipe(_df, [{"type": "add_rank", "params": {"column": "value", "name": "r"}}])
-        assert_("r" in _ranked.columns, f"rank column missing")
+        assert_("r" in _ranked.columns, "rank column missing")
         passed += 1
-        print(f"  ✓ pipeline_pipe_rank")
+        print("  ✓ pipeline_pipe_rank")
     except Exception as e:
         print(f"  ✗ advanced_pandas: {e}")
         failed += 1
@@ -392,8 +440,8 @@ def run_tests():
     print("=" * 60)
     print("test_concurrency.py")
     print("=" * 60)
-    from etl.scrape import run_scrape, ScrapeResult
     from etl.config import ScrapeConfig
+    from etl.scrape import ScrapeResult, run_scrape
 
     class _Tracker:
         def __init__(self):
@@ -403,6 +451,7 @@ def run_tests():
     async def _test_concurrency_limits():
         tracker = _Tracker()
         import etl.scrape as _s
+
         original_fetch = _s.fetch_url
 
         async def fake_fetch(client, url, selectors, rate_limiter, config):
@@ -414,6 +463,7 @@ def run_tests():
 
         _s.fetch_url = fake_fetch
         import tempfile
+
         _tmpdir = tempfile.mkdtemp()
         tmpdb = str(Path(_tmpdir) / "test_concurrency.db")
         config = ScrapeConfig(max_concurrent=3, db_path=tmpdb)

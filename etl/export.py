@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import io
 import json
 import logging
 import sqlite3
@@ -61,18 +60,18 @@ def run_export(db_path: Path, config: ProcessConfig, fmt: str = "both") -> None:
         # Para parquet usamos pandas + pyarrow
         df = load_processed_df(db_path)
         if df.empty:
-            print("⚠ No hay datos para exportar")
+            logger.warning("No hay datos para exportar")
             return
         base_name = "datapipeline_export"
         parquet_path = config.output_dir / f"{base_name}.parquet"
         df.to_parquet(parquet_path, index=False)
-        print(f"✓ Parquet: {parquet_path} ({len(df)} filas)")
-        print(f"✓ Exportación completa ({fmt})")
+        logger.info("Parquet: %s (%d filas)", parquet_path, len(df))
+        logger.info("Exportación completa (%s)", fmt)
         return
 
     columns, rows = load_processed(db_path)
     if not rows:
-        print("⚠ No hay datos para exportar")
+        logger.warning("No hay datos para exportar")
         return
 
     base_name = "datapipeline_export"
@@ -83,12 +82,12 @@ def run_export(db_path: Path, config: ProcessConfig, fmt: str = "both") -> None:
             writer = csv.DictWriter(f, fieldnames=columns)
             writer.writeheader()
             writer.writerows(rows)
-        print(f"✓ CSV: {csv_path} ({len(rows)} filas)")
+        logger.info("CSV: %s (%d filas)", csv_path, len(rows))
 
     if fmt in ("json", "both"):
         json_path = config.output_dir / f"{base_name}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(rows, f, indent=2, ensure_ascii=False, default=str)
-        print(f"✓ JSON: {json_path} ({len(rows)} registros)")
+        logger.info("JSON: %s (%d registros)", json_path, len(rows))
 
-    print(f"✓ Exportación completa ({fmt})")
+    logger.info("Exportación completa (%s)", fmt)

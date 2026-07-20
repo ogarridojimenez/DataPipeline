@@ -4,11 +4,9 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
-
-from etl.process import load_raw_data, clean_data, save_processed
-from etl.export import run_export
 from etl.config import ProcessConfig
+from etl.export import run_export
+from etl.process import clean_data, load_raw_data, save_processed
 
 
 def _create_test_db(db_path: Path) -> None:
@@ -63,6 +61,7 @@ class TestEndToEnd:
 
         # Verificar CSV
         import csv
+
         with open(output_dir / "datapipeline_export.csv") as f:
             reader = csv.DictReader(f)
             csv_rows = list(reader)

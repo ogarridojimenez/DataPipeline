@@ -8,14 +8,14 @@ Ejecutar:
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+
+from etl.process import expand_json_records
 
 # --- Configuración ---
 st.set_page_config(
@@ -26,7 +26,8 @@ st.set_page_config(
 )
 
 # Dark theme CSS
-st.markdown("""
+st.markdown(
+    """
 <style>
     .main .block-container { padding-top: 1rem; max-width: 100%; }
     .stMetric { background: #1e1e1e; border-radius: 8px; padding: 12px; }
@@ -34,13 +35,16 @@ st.markdown("""
     .stMetric [data-testid="stMetricValue"] { color: #4fc3f7; }
     div[data-testid="stSidebar"] { background-color: #1a1a2e; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # --- Data loading ---
 def get_db_path() -> str:
     """Obtiene la ruta de la DB desde session_state o variable de entorno."""
     import os
+
     if "db_path" not in st.session_state:
         st.session_state.db_path = os.environ.get("ETL_DB_PATH", "data/pipeline.db")
     return st.session_state.db_path
@@ -64,24 +68,7 @@ def load_data(db_path: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    # Expandir JSON anidado
-    records = []
-    for _, row in df.iterrows():
-        items = json.loads(row["data"])
-        if isinstance(items, list):
-            for item in items:
-                if isinstance(item, dict):
-                    item["_source_url"] = row.get("source_url", "")
-                    item["_source_domain"] = row.get("source_domain", "")
-                    item["_scraped_at"] = row.get("scraped_at", "")
-                    records.append(item)
-        elif isinstance(items, dict):
-            items["_source_url"] = row.get("source_url", "")
-            items["_source_domain"] = row.get("source_domain", "")
-            items["_scraped_at"] = row.get("scraped_at", "")
-            records.append(items)
-
-    return pd.DataFrame(records)
+    return expand_json_records(df, data_col="data")
 
 
 def load_processed_data(db_path: str) -> pd.DataFrame:
@@ -101,24 +88,11 @@ def load_processed_data(db_path: str) -> pd.DataFrame:
     if df.empty:
         return df
 
-    records = []
-    for _, row in df.iterrows():
-        try:
-            data = json.loads(row["data"])
-            if isinstance(data, dict):
-                data["_source_url"] = row.get("source_url", "")
-                data["_source_domain"] = row.get("source_domain", "")
-                records.append(data)
-        except (json.JSONDecodeError, TypeError):
-            continue
-
-    return pd.DataFrame(records)
+    return expand_json_records(df, data_col="data")
 
 
 # --- Sidebar ---
 st.sidebar.title("⚙ Configuración")
-
-# DB path selector
 db_path_input = st.sidebar.text_input(
     "Ruta de la base de datos",
     value=get_db_path(),
@@ -139,7 +113,7 @@ df = load_data(db_path) if data_source == "Raw (scraped)" else load_processed_da
 
 if df.empty:
     st.warning("⚠ No hay datos disponibles. Ejecuta primero el pipeline ETL:")
-    st.code("python -m etl scrape <url> --selectors \"h2.title\" \".price\"\npython -m etl process", language="bash")
+    st.code('python -m etl scrape <url> --selectors "h2.title" ".price"\npython -m etl process', language="bash")
     st.stop()
 
 # --- Filters ---
@@ -326,8 +300,6 @@ with col_e2:
 # --- Footer ---
 st.markdown("---")
 st.markdown(
-    "<div style='text-align: center; color: #666;'>"
-    "DataPipeline v0.1.0 | Powered by Streamlit + Plotly"
-    "</div>",
+    "<div style='text-align: center; color: #666;'>DataPipeline v0.1.0 | Powered by Streamlit + Plotly</div>",
     unsafe_allow_html=True,
 )

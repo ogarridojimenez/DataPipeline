@@ -21,6 +21,7 @@ logger = logging.getLogger("etl.scrape")
 @dataclass
 class ScrapeResult:
     """Resultado de scraping de una URL."""
+
     url: str
     domain: str
     data: list[dict[str, str]]
@@ -121,7 +122,7 @@ async def fetch_url(
             logger.warning("Connection error for %s: %s (attempt %d)", url, e, attempt + 1)
             if attempt == config.max_retries - 1:
                 return ScrapeResult(url=url, domain=domain, data=[], status_code=0, error=str(e))
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2**attempt)
 
     return ScrapeResult(url=url, domain=domain, data=[], status_code=0, error="Max retries exceeded")
 
@@ -130,6 +131,7 @@ def save_to_sqlite(results: list[ScrapeResult], db_path, incremental: bool = Tru
     """Guarda resultados en SQLite. Retorna total de filas insertadas."""
     import hashlib
     from pathlib import Path
+
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -145,7 +147,6 @@ def save_to_sqlite(results: list[ScrapeResult], db_path, incremental: bool = Tru
             scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
 
     skipped = 0
     total_rows = 0
@@ -171,7 +172,7 @@ def save_to_sqlite(results: list[ScrapeResult], db_path, incremental: bool = Tru
     conn.commit()
     conn.close()
     if incremental and skipped:
-        print(f"  ↻ Saltados por duplicado: {skipped} filas")
+        logger.info("  ↻ Saltados por duplicado: %s filas", skipped)
     return total_rows, skipped
 
 
@@ -193,12 +194,14 @@ async def run_scrape(urls: list[str], selectors: list[str], config: ScrapeConfig
 
     success = sum(1 for r in results if not r.error)
     failed = len(results) - success
-    print(f"✓ Scraping completo: {success}/{len(results)} URLs, {total} filas guardadas en {config.db_path}")
+    logger.info(
+        "✓ Scraping completo: %s/%s URLs, %s filas guardadas en %s", success, len(results), total, config.db_path
+    )
     if failed:
-        print(f"✗ {failed} URLs fallaron")
+        logger.warning("✗ %s URLs fallaron", failed)
         for r in results:
             if r.error:
-                print(f"  - {r.url}: {r.error}")
+                logger.warning("  - %s: %s", r.url, r.error)
 
     # Webhook notification
     if config.webhook_url:
