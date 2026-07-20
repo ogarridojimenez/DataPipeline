@@ -18,6 +18,35 @@ import streamlit as st
 from etl.config import validate_db_path
 from etl.process import expand_json_records
 
+# --- Auth ---
+try:
+    DASHBOARD_PASSWORD = st.secrets.get("dashboard", {}).get("password")
+except Exception:
+    DASHBOARD_PASSWORD = None
+
+
+def check_auth() -> bool:
+    """Verifica autenticación. Retorna True si está autenticado o no hay password."""
+    if not DASHBOARD_PASSWORD:
+        return True
+    if "authenticated" in st.session_state and st.session_state.authenticated:
+        return True
+    return False
+
+
+def render_login() -> None:
+    """Renderiza formulario de login."""
+    st.title("🔐 DataPipeline Dashboard")
+    with st.form("login_form"):
+        pwd = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("Entrar"):
+            if pwd == DASHBOARD_PASSWORD:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta")
+
+
 # --- Configuración ---
 st.set_page_config(
     page_title="DataPipeline Dashboard",
@@ -26,6 +55,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# --- Auth gate ---
+if not check_auth():
+    render_login()
+    st.stop()
+
+# --- Sidebar ---
 # Dark theme CSS
 st.markdown(
     """
